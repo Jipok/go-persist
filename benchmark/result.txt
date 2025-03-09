@@ -1,0 +1,106 @@
+                __.;=====;.__                   root@n2
+            _.=+==++=++=+=+===;.                -------
+             -=+++=+===+=+=+++++=_              OS: Void Linux x86_64
+        .     -=:``     `--==+=++==.            Host: AM02
+       _vi,    `            --+=++++:           Kernel: 6.12.16_1
+      .uvnvi.       _._       -==+==+.          Uptime: 51 mins
+     .vvnvnI`    .;==|==;.     :|=||=|.         Packages: 204 (xbps-query)
++QmQQmpvvnv; _yYsyQQWUUQQQm #QmQ#:QQQWUV$QQm.   Shell: bash 5.2.32
+ -QQWQWpvvowZ?.wQQQE==<QWWQ/QWQW.QQWW(: jQWQE   Terminal: /dev/pts/0
+  -$QQQQmmU'  jQQQ@+=<QWQQ)mQQQ.mQQQC+;jWQQ@'   CPU: Intel N100 (4) @ 3.400GHz
+   -$WQ8YnI:   QWQQwgQQWV`mWQQ.jQWQQgyyWW@!     GPU: Intel Alder Lake-N [UHD Graphics]
+     -1vvnvv.     `~+++`        ++|+++          Memory: 231MiB / 15740MiB
+      +vnvnnv,                 `-|===
+       +vnvnvns.           .      :=-
+        -Invnvvnsi..___..=sv=.     `
+          +Invnvnvnnnnnnnnvvnn;.
+            ~|Invnvnvvnvvvnnv}+`
+               -~|{*l}*|~
+
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+prePopCount = 100000 // keys for pre-population
+writePerc = 20       // write operations ratio (20% write, 80% read)
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+===== Benchmarking: Structs =====
+go-persist   1,000,000 ops over 50 threads in 170ms, 5,889,366/sec, 169 ns/op
+sync.Map     1,000,000 ops over 50 threads in 185ms, 5,403,124/sec, 185 ns/op
+map+RWMutex  1,000,000 ops over 50 threads in 373ms, 2,677,549/sec, 373 ns/op
+buntdb       1,000,000 ops over 50 threads in 3888ms, 257,204/sec, 3887 ns/op
+bolt         1,000,000 ops over 50 threads in 5313ms, 188,210/sec, 5313 ns/op
+
+----- File sizes (MB) -----
+persist.db1: 11.25 MB
+buntdb.db1: 21.03 MB
+bolt.db1: 24.00 MB
+
+===== Benchmarking: Strings =====
+go-persist   1,000,000 ops over 50 threads in 142ms, 7,036,006/sec, 142 ns/op
+sync.Map     1,000,000 ops over 50 threads in 170ms, 5,882,571/sec, 169 ns/op
+map+RWMutex  1,000,000 ops over 50 threads in 383ms, 2,609,668/sec, 383 ns/op
+buntdb       1,000,000 ops over 50 threads in 2679ms, 373,315/sec, 2678 ns/op
+bolt         1,000,000 ops over 50 threads in 4938ms, 202,526/sec, 4937 ns/op
+
+----- File sizes (MB) -----
+persist.db2: 7.99 MB
+test.buntdb: 27.27 MB
+bolt.db2: 24.00 MB
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+===== Benchmarking: Structs =====
+go-persist   5,000,000 ops over 100 threads in 837ms, 5,971,224/sec, 167 ns/op
+sync.Map     5,000,000 ops over 100 threads in 735ms, 6,804,760/sec, 146 ns/op
+map+RWMutex  5,000,000 ops over 100 threads in 2796ms, 1,788,236/sec, 559 ns/op
+buntdb       5,000,000 ops over 100 threads in 20537ms, 243,459/sec, 4107 ns/op
+bolt         5,000,000 ops over 100 threads in 27322ms, 183,002/sec, 5464 ns/op
+
+----- File sizes (MB) -----
+persist.db1: 14.31 MB
+buntdb.db1: 23.44 MB
+bolt.db1: 24.00 MB
+
+===== Benchmarking: Strings =====
+go-persist   5,000,000 ops over 100 threads in 692ms, 7,221,866/sec, 138 ns/op
+sync.Map     5,000,000 ops over 100 threads in 649ms, 7,700,702/sec, 129 ns/op
+map+RWMutex  5,000,000 ops over 100 threads in 2732ms, 1,830,078/sec, 546 ns/op
+buntdb       5,000,000 ops over 100 threads in 13107ms, 381,482/sec, 2621 ns/op
+bolt         5,000,000 ops over 100 threads in 25270ms, 197,865/sec, 5053 ns/op
+
+----- File sizes (MB) -----
+persist.db2: 8.10 MB
+test.buntdb: 17.91 MB
+bolt.db2: 24.00 MB
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+===== Benchmarking: Structs =====
+go-persist   100,000 ops over 150 threads in 15ms, 6,471,051/sec, 154 ns/op
+sync.Map     100,000 ops over 150 threads in 55ms, 1,818,413/sec, 549 ns/op
+map+RWMutex  100,000 ops over 150 threads in 21ms, 4,782,496/sec, 209 ns/op
+buntdb       100,000 ops over 150 threads in 362ms, 276,298/sec, 3619 ns/op
+bolt         100,000 ops over 150 threads in 567ms, 176,401/sec, 5668 ns/op
+
+----- File sizes (MB) -----
+persist.db1: 7.07 MB
+buntdb.db1: 8.33 MB
+bolt.db1: 24.00 MB
+
+===== Benchmarking: Strings =====
+go-persist   100,000 ops over 150 threads in 10ms, 10,008,672/sec, 99 ns/op
+sync.Map     100,000 ops over 150 threads in 55ms, 1,803,024/sec, 554 ns/op
+map+RWMutex  100,000 ops over 150 threads in 22ms, 4,479,970/sec, 223 ns/op
+buntdb       100,000 ops over 150 threads in 221ms, 452,664/sec, 2209 ns/op
+bolt         100,000 ops over 150 threads in 544ms, 183,888/sec, 5438 ns/op
+
+----- File sizes (MB) -----
+persist.db2: 7.47 MB
+test.buntdb: 10.43 MB
+bolt.db2: 24.00 MB
