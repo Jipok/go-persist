@@ -111,10 +111,7 @@ func main() {
     fmt.Printf("User: %+v\n", john)
     
     // Delete a user
-    err = users.Delete("john")
-    if err != nil {
-        log.Fatal(err)
-    }
+    users.Delete("john")
 }
 ```
 
@@ -164,7 +161,7 @@ func main() {
     }
     
     // Store configuration directly
-    err := store.Set("system_config", Config{
+    err = store.Set("system_config", Config{
         Debug:          true,
         MaxConnections: 100,
     })
@@ -214,4 +211,3 @@ This approach balances performance and durability.
 - Not designed for datasets larger than available memory
 - No support for complex queries or secondary indexes
 - WAL file grows until `Shrink()` is called
-- Not suitable for distributed environments
