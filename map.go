@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/puzpuzpuz/xsync/v3"
 )
@@ -41,34 +40,14 @@ func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
 		return nil, err
 	}
 
-	// Start background goroutine that flushes dirty entries to the WAL
-	pm.startBackgroundFlush()
-
 	// Register this PersistMap instance in the Store registry
 	store.persistMaps.Store(mapName, pm)
 
 	return pm, nil
 }
 
-// startBackgroundFlush launches a goroutine that periodically flushes dirty keys to the WAL
-func (pm *PersistMap[T]) startBackgroundFlush() {
-	pm.wg.Add(1)
-	go func() {
-		ticker := time.NewTicker(SyncInterval)
-		defer ticker.Stop()
-		defer pm.wg.Done()
-		for {
-			select {
-			case <-ticker.C:
-				pm.Flush()
-			case <-pm.stopFlush:
-				return
-			}
-		}
-	}()
-}
-
 // Persists all dirty keys to the WAL
+// Automatically called from store BackgroundSync
 func (pm *PersistMap[T]) Flush() {
 	// Iterate over dirty keys in the set
 	pm.dirty.Range(func(key string, _ interface{}) bool {
@@ -172,7 +151,7 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 	// Update in-memory xsync.Map
 	pm.data.Store(key, value)
 	// Mark key as dirty
-	pm.dirty.Store(key, struct{}{})
+	pm.dirty.Store(key, struct{}{}) // Faster then LoadOrStore
 }
 
 // Delete removes the key from the in-memory map and marks it as dirty for background flush

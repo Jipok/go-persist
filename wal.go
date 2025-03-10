@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/puzpuzpuz/xsync/v3"
@@ -18,8 +19,8 @@ import (
 // to validate file format and version compatibility
 const WalHeader = "go-persist 1"
 
-// Interval for background f.Sync()
-const SyncInterval = time.Second
+// Default value for store.syncInterval
+const DefaultSyncInterval = time.Second
 
 var (
 	// ErrKeyNotFound is returned when the key is not found in the storage
@@ -28,12 +29,13 @@ var (
 
 // Store represents the WAL(write-ahead log) storage
 type Store struct {
-	mu          sync.Mutex     // protects concurrent access to the file
-	f           *os.File       // file descriptor for append operations
-	path        string         // file path used for reopening during reads
-	stopSync    chan struct{}  // channel to signal background sync to stop
-	wg          sync.WaitGroup // waitgroup for background sync goroutine
-	persistMaps *xsync.Map     // registry of PersistMap instances (values are Closer interface)
+	mu           sync.Mutex     // protects concurrent access to the file
+	f            *os.File       // file descriptor for append operations
+	path         string         // file path used for reopening during reads
+	stopSync     chan struct{}  // channel to signal background sync to stop
+	wg           sync.WaitGroup // waitgroup for background sync goroutine
+	persistMaps  *xsync.Map     // registry of PersistMap instances (values are Closer interface)
+	syncInterval atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
 }
 
 // Open creates or opens a persistent storage file and returns a new Store instance
@@ -91,6 +93,7 @@ func Open(path string) (*Store, error) {
 		stopSync:    make(chan struct{}),
 		persistMaps: xsync.NewMap(),
 	}
+	s.SetSyncInterval(DefaultSyncInterval)
 
 	s.startBackgroundSync()
 	return s, nil
@@ -100,16 +103,27 @@ func Open(path string) (*Store, error) {
 func (s *Store) startBackgroundSync() {
 	s.wg.Add(1)
 	go func() {
-		ticker := time.NewTicker(SyncInterval)
-		defer ticker.Stop()
+		timer := time.NewTimer(s.GetSyncInterval())
+		defer timer.Stop()
 		defer s.wg.Done()
 		for {
 			select {
-			case <-ticker.C:
+			case <-timer.C:
+				// Flush Maps
+				s.persistMaps.Range(func(key string, val interface{}) bool {
+					if pm, ok := val.(interface{ Flush() }); ok {
+						pm.Flush() // Flush the PersistMap
+					} else {
+						panic("Can't cast? WTF")
+					}
+					return true
+				})
+				// Flush file
 				err := s.Flush()
 				if err != nil {
 					log.Println("go-persist: Background sync failed:", err)
 				}
+				timer.Reset(s.GetSyncInterval())
 			case <-s.stopSync:
 				return
 			}
@@ -294,6 +308,7 @@ func (s *Store) Get(key string, target interface{}) error {
 // atomically replaces the original file. This helps to reclaim
 // disk space and improve read performance.
 func (s *Store) Shrink() error {
+	// TODO Need less lock time
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -401,4 +416,14 @@ func (s *Store) Shrink() error {
 	s.f = newFile
 
 	return nil
+}
+
+// GetSyncInterval returns the current sync interval
+func (s *Store) GetSyncInterval() time.Duration {
+	return time.Duration(s.syncInterval.Load())
+}
+
+// SetSyncInterval sets a new sync interval
+func (s *Store) SetSyncInterval(interval time.Duration) {
+	s.syncInterval.Store(int64(interval))
 }
