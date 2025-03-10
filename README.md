@@ -32,34 +32,33 @@ Ultimately, `go-persist` was born from real-world pain point, eliminating the un
 *Benchmark: 1M struct operations over 150 threads, after 100k prefill*
 | Solution           | Operations/sec | ns/op | File Size |
 |--------------------|----------------|-------|-----------|
-| go-persist `Async`   | 7,114,784      | 140   | 6.07 MB  |
+| go-persist `Async` | 7,114,784      | 140   | 6.07 MB   |
 | sync.Map           | 5,533,168      | 180   | N/A       |
 | map+RWMutex        | 2,132,890      | 468   | N/A       |
-| go-persist `Set`     | 1,351,765      | 739   | 6.07 MB  |
+| go-persist `Set`   | 1,351,765      | 739   | 6.07 MB   |
 | buntdb             | 240,207        | 4163  | 8.41 MB   |
-| bolt       `NoSync`  | 179,476        | 5571  | 24.00 MB  |
+| bolt       `NoSync`| 179,476        | 5571  | 24.00 MB  |
 
 Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
 
 ## Human-readable and writable Write-Ahead Log format:
 
+```bash
+go-persist 1                                          # Version header
+S key1                                                # Set operation for key1
+{"Name":"Alice","Age":30,"Email":"alice@example.com"} # Value
+S key2                                                # Set operation for key2
+"some plain string"                                   # Value
+D key1                                                # Delete operation for key1
+                                                      # Empty string for delete op
+S key2                                                # New version of key2
+"some another plain string"                           # Updated value
+
 ```
-go-persist 1
-S key1
-{"Name":"Alice","Age":30,"Email":"alice@example.com"}
-S key2
-"some plain string"
-D key1
 
-S key2
-"some another plain string"
-(etc...)
-```
-
-- "S key" indicates a set operation for a key.
-- "D key" indicates a delete operation.
-- `Shrink()` compacts the file by removing deleted keys and old versions
-
+- `S key` - Set operation
+- `D key` - Delete operation
+- **Values**: Stored as standard JSON on the line after the operation
 
 ## Installation
 
@@ -72,6 +71,15 @@ go get github.com/Jipok/go-persist
 ### Using PersistMap (Type-Safe API)
 
 ```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/Jipok/go-persist"
+)
+
 type User struct {
     Name  string
     Email string
@@ -231,7 +239,37 @@ go-persist offers multiple durability options to balance performance and data sa
 3. **FSync Methods** (`SetFSync`, `DeleteFSync`): Maximum durability with fsync guarantee.
    - Updates are written to WAL and flushed to physical disk with fsync
    - Safe against both application and system crashes
-   - Use when data integrity is critical (transactions, financial data)
+   - Use when data integrity is critical
+
+### Configuring Sync Interval
+
+The sync interval controls:
+* When batched Async operations are written to the WAL file
+* When regular Set operations are synced from OS page cache to physical disk
+
+```go
+// Get the current sync interval
+interval := store.GetSyncInterval()
+
+// Set a custom sync interval
+store.SetSyncInterval(500 * time.Millisecond) // More frequent syncing
+// or
+store.SetSyncInterval(1 * time.Second)  // Default
+// or
+store.SetSyncInterval(10 * time.Minute) // Minimal disk activity
+```
+
+Adjusting the sync interval lets you fine-tune the trade-off between performance and durability:
+
+- **Short intervals** (milliseconds to second): Reduce potential data loss window but cause more frequent disk activity
+- **Medium intervals** (seconds): Good balance for most applications
+- **Long intervals** (minutes to hours): Minimize disk activity and extend SSD/HDD lifespan, but with larger potential data loss windows in case of crashes
+
+With very long intervals, `Async` operations will cause practically no disk writes during normal operation, making this option excellent for conserving storage device lifespan when persistence is mainly needed for planned shutdowns rather than crash recovery.
+
+For the `Set` method, even with a very long sync interval, changes are initially written to the OS page cache. The system itself will eventually flush these changes to disk (i.e., perform an fsync) according to its own caching policies. On Linux, by default:
+* The parameter `/proc/sys/vm/dirty_writeback_centisecs` is typically set to 500 (≈5 seconds), meaning the kernel scans for dirty pages and may flush them every ~5 seconds.
+* The parameter `/proc/sys/vm/dirty_expire_centisecs` is usually around 3000 (≈30 seconds), so pages older than ~30 seconds are forced to be written to disk.
 
 ## When to Use
 
