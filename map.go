@@ -8,18 +8,15 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
 type PersistMap[T any] struct {
-	store     *Store        // underlying WAL store
-	data      *xsync.Map    // in-memory map holding decoded values of type T
-	prefix    string        // namespace prefix for keys (e.g. "mapName:")
-	dirty     *xsync.Map    // set of dirty keys; value is struct{} as a dummy
-	stopFlush chan struct{} // channel to signal stop of background flush
-	wg        sync.WaitGroup
+	store  *Store     // underlying WAL store
+	data   *xsync.Map // in-memory map holding decoded values of type T
+	prefix string     // namespace prefix for keys (e.g. "mapName:")
+	dirty  *xsync.Map // set of dirty keys; value is struct{} as a dummy
 }
 
 // PersistMap represents a thread-safe persistent key-value store with type-safe values.
@@ -28,11 +25,10 @@ type PersistMap[T any] struct {
 // The mapName parameter is used as a namespace: keys will be stored as "mapName:key" in the WAL.
 func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
 	pm := &PersistMap[T]{
-		store:     store,
-		data:      xsync.NewMap(), // Using xsync.Map instead of built-in map
-		prefix:    mapName + ":",  // Using "mapName:" as prefix for keys
-		dirty:     xsync.NewMap(), // Initialize dirty set
-		stopFlush: make(chan struct{}),
+		store:  store,
+		data:   xsync.NewMap(), // Using xsync.Map instead of built-in map
+		prefix: mapName + ":",  // Using "mapName:" as prefix for keys
+		dirty:  xsync.NewMap(), // Initialize dirty set
 	}
 
 	// Load data from the WAL file with immediate validation
@@ -223,9 +219,4 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	return nil
 }
 
-// close stops the background flush goroutine
-func (pm *PersistMap[T]) close() {
-	pm.Flush()
-	close(pm.stopFlush)
-	pm.wg.Wait()
-}
+// func

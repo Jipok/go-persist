@@ -115,13 +115,6 @@ func (s *Store) startBackgroundSync() {
 		for {
 			select {
 			case <-timer.C:
-				// Flush Maps
-				s.persistMaps.Range(func(key string, val interface{}) bool {
-					pm, _ := val.(interface{ Flush() })
-					pm.Flush()
-					return true
-				})
-				// Flush file
 				err := s.Flush()
 				if err != nil {
 					s.ErrorHandler(fmt.Errorf("background sync failed: %s", err))
@@ -138,28 +131,26 @@ func (s *Store) startBackgroundSync() {
 // Then closes the underlying file.
 // The Store should not be used after calling Close.
 func (s *Store) Close() error {
-	// Iterate over all registered PersistMap instances and close them
-	s.persistMaps.Range(func(key string, val interface{}) bool {
-		if pm, ok := val.(interface{ close() }); ok {
-			pm.close()
-		} else {
-			panic("Can't cast? WTF")
-		}
-		return true
-	})
-
 	// Signal background sync to stop and wait for it to finish
 	close(s.stopSync)
 	s.wg.Wait()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.f.Sync()
+	err := s.Flush()
+	if err != nil {
+		return err
+	}
 	return s.f.Close()
 }
 
 // Flushes all pending writes to disk immediately
 func (s *Store) Flush() error {
+	// Flush Maps
+	s.persistMaps.Range(func(key string, val interface{}) bool {
+		pm, _ := val.(interface{ Flush() })
+		pm.Flush()
+		return true
+	})
+	// Flush file
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.f.Sync()
