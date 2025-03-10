@@ -29,14 +29,15 @@ Ultimately, `go-persist` was born from real-world pain point, eliminating the un
 
 ## Performance
 
-*Benchmark: 1M struct operations over 50 threads, after 100k prefill*
-| Solution    | Operations/sec | ns/op | File Size |
-|-------------|----------------|-------|-----------|
-| go-persist  | 5,889,366      | 169   | 11.25 MB  |
-| sync.Map    | 5,403,124      | 185   | N/A       |
-| map+RWMutex | 2,677,549      | 373   | N/A       |
-| BuntDB      | 257,204        | 3887  | 21.03 MB  |
-| BoltDB      | 188,210        | 5313  | 24.00 MB  |
+*Benchmark: 1M struct operations over 150 threads, after 100k prefill*
+| Solution           | Operations/sec | ns/op | File Size |
+|--------------------|----------------|-------|-----------|
+| go-persist `Async`   | 7,114,784      | 140   | 6.07 MB  |
+| sync.Map           | 5,533,168      | 180   | N/A       |
+| map+RWMutex        | 2,132,890      | 468   | N/A       |
+| go-persist `Set`     | 1,351,765      | 739   | 6.07 MB  |
+| buntdb             | 240,207        | 4163  | 8.41 MB   |
+| bolt       `NoSync`  | 179,476        | 5571  | 24.00 MB  |
 
 Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
 
@@ -96,12 +97,32 @@ func main() {
         log.Fatal(err)
     }
     
-    // Store a user
-    users.Set("john", User{
+    // Store a user (with different durability options)
+    
+    // Option 1: High Performance (background flush - fastest)
+    users.SetAsync("john", User{
         Name: "John Doe", 
         Email: "john@example.com", 
         Age: 30,
     })
+    
+    // Recommended
+    // Option 2: Immediate WAL Write (balanced durability)
+    users.Set("alice", User{
+        Name: "Alice Smith", 
+        Email: "alice@example.com", 
+        Age: 28,
+    })
+    
+    // Option 3: Maximum Durability (with fsync - slowest)
+    err = users.SetFSync("bob", User{
+        Name: "Bob Johnson", 
+        Email: "bob@example.com", 
+        Age: 35,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
     
     // Retrieve a user
     john, ok := users.Get("john")
@@ -110,8 +131,14 @@ func main() {
     }
     fmt.Printf("User: %+v\n", john)
     
-    // Delete a user
-    users.Delete("john")
+    // Delete a user (also with durability options)
+    users.DeleteAsync("john")  // Background delete (fastest)
+    users.Delete("alice")      // Immediate WAL write
+    
+    err = users.DeleteFSync("bob")  // Maximum durability with fsync
+    if err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -187,17 +214,24 @@ func main() {
 }
 ```
 
-## How Crash Recovery Works
+## Durability Levels
 
-The WAL design ensures data is recoverable after unexpected crashes:
-1) Modifications are first applied to the in-memory map
-2) Changes are marked as "dirty" and queued for writing
-3) A background goroutine flushes dirty entries to the WAL periodically
-4) Each entry is fully written with proper terminators before being considered valid
-5) On restart, the WAL is replayed, rebuilding the in-memory state
-6) Incomplete records (from crashes during writes) are automatically ignored
+go-persist offers multiple durability options to balance performance and data safety:
 
-This approach balances performance and durability.
+1. **Async Methods** (`SetAsync`, `DeleteAsync`): Highest performance with deferred persistence. 
+   - Updates are applied in-memory immediately
+   - Changes are flushed to disk by a background process
+   - Best for high-throughput scenarios where occasional data loss on crashes is acceptable
+
+2. **Immediate Methods** (`Set`, `Delete`): Balanced performance with immediate WAL updates.
+   - Updates are applied in-memory and written to WAL immediately
+   - Safe against application crashes, but susceptible to system crashes
+   - Good for most typical use cases
+
+3. **FSync Methods** (`SetFSync`, `DeleteFSync`): Maximum durability with fsync guarantee.
+   - Updates are written to WAL and flushed to physical disk with fsync
+   - Safe against both application and system crashes
+   - Use when data integrity is critical (transactions, financial data)
 
 ## When to Use
 
