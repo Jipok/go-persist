@@ -219,4 +219,27 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	return nil
 }
 
-// func
+// Size returns current size of the map
+func (pm *PersistMap[T]) Size() int {
+	return pm.data.Size()
+}
+
+// Range calls f sequentially for each key and value present in the
+// map. If f returns false, range stops the iteration.
+//
+// Range does not necessarily correspond to any consistent snapshot
+// of the Map's contents: no key will be visited more than once, but
+// if the value for any key is stored or deleted concurrently, Range
+// may reflect any mapping for that key from any point during the
+// Range call.
+//
+// It is safe to modify the map while iterating it, including entry
+// creation, modification and deletion. However, the concurrent
+// modification rule apply, i.e. the changes may be not reflected
+// in the subsequently iterated entries.
+func (pm *PersistMap[T]) Range(f func(key string, value T) bool) {
+	pm.data.Range(func(key string, value interface{}) bool {
+		// Type assertion from interface{} to T
+		return f(key, value.(T))
+	})
+}
