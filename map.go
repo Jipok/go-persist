@@ -54,7 +54,7 @@ func (pm *PersistMap[T]) Flush() {
 			// Lock is taken for this key. Now we can read the in-memory value.
 			if v, ok := pm.data.Load(key); ok {
 				// Try persisting the current value in WAL
-				if err := pm.store.Set(namespacedKey, v); err != nil {
+				if err := pm.store.Write(namespacedKey, v); err != nil {
 					log.Println("go-persist: Background flush set failed for key:", key, "error:", err)
 					// Return oldValue and false, so that the dirty flag is not removed.
 					return oldValue, false
@@ -158,7 +158,7 @@ func (pm *PersistMap[T]) SetAsync(key string, value T) {
 func (pm *PersistMap[T]) Set(key string, value T) {
 	namespacedKey := pm.prefix + key
 	// Write the set record to disk(page cache) immediately
-	if err := pm.store.Set(namespacedKey, value); err != nil {
+	if err := pm.store.Write(namespacedKey, value); err != nil {
 		pm.store.ErrorHandler(err)
 	}
 	// Update in-memory xsync.Map
@@ -170,8 +170,8 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 // but with highest performance cost.
 func (pm *PersistMap[T]) SetFSync(key string, value T) error {
 	namespacedKey := pm.prefix + key
-	// Write the set record to disk immediately using the underlying store
-	if err := pm.store.Set(namespacedKey, value); err != nil {
+	// Write the set record to disk immediately
+	if err := pm.store.Write(namespacedKey, value); err != nil {
 		return err
 	}
 	// Flush all pending writes to disk (fsync)

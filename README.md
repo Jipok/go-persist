@@ -196,7 +196,7 @@ func main() {
     }
     
     // Store configuration directly
-    err = store.Set("system_config", Config{
+    err = store.Write("system_config", Config{
         Debug:          true,
         MaxConnections: 100,
     })
@@ -204,10 +204,10 @@ func main() {
         log.Fatal(err)
     }
     
-    // NOTE: store.Get reads the entire WAL and should primarily be 
+    // NOTE: store.Read reads the entire WAL and should primarily be 
     // used for initial loading at program start, not frequent access
     var config Config
-    err = store.Get("system_config", &config)
+    err = store.Read("system_config", &config)
     if err != nil {
         log.Fatal(err)
     }
@@ -215,7 +215,7 @@ func main() {
     
     // When you need to update the config
     config.MaxConnections = 200
-    err = store.Set("system_config", config)
+    err = store.Write("system_config", config)
     if err != nil {
         log.Fatal(err)
     }
