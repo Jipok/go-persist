@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -36,6 +37,7 @@ type Store struct {
 	wg           sync.WaitGroup // waitgroup for background sync goroutine
 	persistMaps  *xsync.Map     // registry of PersistMap instances (values are Closer interface)
 	syncInterval atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
+	ErrorHandler func(err error)
 }
 
 // Open creates or opens a persistent storage file and returns a new Store instance
@@ -95,6 +97,10 @@ func Open(path string) (*Store, error) {
 	}
 	s.SetSyncInterval(DefaultSyncInterval)
 
+	s.ErrorHandler = func(err error) {
+		log.Fatal("go-persist: ", err)
+	}
+
 	s.startBackgroundSync()
 	return s, nil
 }
@@ -111,17 +117,14 @@ func (s *Store) startBackgroundSync() {
 			case <-timer.C:
 				// Flush Maps
 				s.persistMaps.Range(func(key string, val interface{}) bool {
-					if pm, ok := val.(interface{ Flush() }); ok {
-						pm.Flush() // Flush the PersistMap
-					} else {
-						panic("Can't cast? WTF")
-					}
+					pm, _ := val.(interface{ Flush() })
+					pm.Flush()
 					return true
 				})
 				// Flush file
 				err := s.Flush()
 				if err != nil {
-					log.Println("go-persist: Background sync failed:", err)
+					s.ErrorHandler(fmt.Errorf("background sync failed: %s", err))
 				}
 				timer.Reset(s.GetSyncInterval())
 			case <-s.stopSync:

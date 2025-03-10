@@ -159,17 +159,14 @@ func (pm *PersistMap[T]) SetAsync(key string, value T) {
 // Set updates both in-memory data and WAL file immediately, but without fsync.
 // Safe for application crashes, as WAL ensures recovery, but may lose updates
 // during system crashes if data remains in OS cache.
-func (pm *PersistMap[T]) Set(key string, value T) error {
+func (pm *PersistMap[T]) Set(key string, value T) {
 	namespacedKey := pm.prefix + key
 	// Write the set record to disk(page cache) immediately
 	if err := pm.store.Set(namespacedKey, value); err != nil {
-		return err
+		pm.store.ErrorHandler(err)
 	}
 	// Update in-memory xsync.Map
 	pm.data.Store(key, value)
-	// Remove key from dirty set if present
-	// pm.dirty.Delete(key)
-	return nil
 }
 
 // SetFSync updates in-memory data, WAL file, and forces physical disk write with fsync.
@@ -187,8 +184,6 @@ func (pm *PersistMap[T]) SetFSync(key string, value T) error {
 	}
 	// Update in-memory xsync.Map
 	pm.data.Store(key, value)
-	// Remove key from dirty set if present
-	// pm.dirty.Delete(key)
 	return nil
 }
 
@@ -201,17 +196,14 @@ func (pm *PersistMap[T]) DeleteAsync(key string) {
 }
 
 // Delete immediately deletes the key from both WAL and in-memory map
-func (pm *PersistMap[T]) Delete(key string) error {
+func (pm *PersistMap[T]) Delete(key string) {
 	namespacedKey := pm.prefix + key
 	// Write the delete record to WAL immediately
 	if err := pm.store.Delete(namespacedKey); err != nil {
-		return err
+		pm.store.ErrorHandler(err)
 	}
 	// Remove the key from the in-memory xsync.Map
 	pm.data.Delete(key)
-	// Remove the key from the dirty set to avoid re-flushing
-	// pm.dirty.Delete(key)
-	return nil
 }
 
 // DeleteFSync writes a delete record to WAL immediately, flushes to disk (fsync),
@@ -228,8 +220,6 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	}
 	// Remove the key from the in-memory xsync.Map
 	pm.data.Delete(key)
-	// Remove the key from the dirty set if present
-	// pm.dirty.Delete(key)
 	return nil
 }
 
