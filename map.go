@@ -146,18 +146,91 @@ func (pm *PersistMap[T]) Get(key string) (T, bool) {
 	return typedValue, true
 }
 
-// Set updates the in-memory map and marks the key as dirty for background WAL flush
-func (pm *PersistMap[T]) Set(key string, value T) {
+// SetAsync updates the in-memory map and marks the key as dirty.
+// Its actual persistence is deferred to a background flush, providing higher performance
+// at the cost of delayed durability.
+func (pm *PersistMap[T]) SetAsync(key string, value T) {
 	// Update in-memory xsync.Map
 	pm.data.Store(key, value)
 	// Mark key as dirty
-	pm.dirty.Store(key, struct{}{}) // Faster then LoadOrStore
+	pm.dirty.Store(key, struct{}{}) // Faster than LoadOrStore
 }
 
-// Delete removes the key from the in-memory map and marks it as dirty for background flush
-func (pm *PersistMap[T]) Delete(key string) {
+// Set updates both in-memory data and WAL file immediately, but without fsync.
+// Safe for application crashes, as WAL ensures recovery, but may lose updates
+// during system crashes if data remains in OS cache.
+func (pm *PersistMap[T]) Set(key string, value T) error {
+	namespacedKey := pm.prefix + key
+	// Write the set record to disk(page cache) immediately
+	if err := pm.store.Set(namespacedKey, value); err != nil {
+		return err
+	}
+	// Update in-memory xsync.Map
+	pm.data.Store(key, value)
+	// Remove key from dirty set if present
+	// pm.dirty.Delete(key)
+	return nil
+}
+
+// SetFSync updates in-memory data, WAL file, and forces physical disk write with fsync.
+// Most durable option that protects against both application and system crashes,
+// but with highest performance cost.
+func (pm *PersistMap[T]) SetFSync(key string, value T) error {
+	namespacedKey := pm.prefix + key
+	// Write the set record to disk immediately using the underlying store
+	if err := pm.store.Set(namespacedKey, value); err != nil {
+		return err
+	}
+	// Flush all pending writes to disk (fsync)
+	if err := pm.store.Flush(); err != nil {
+		return err
+	}
+	// Update in-memory xsync.Map
+	pm.data.Store(key, value)
+	// Remove key from dirty set if present
+	// pm.dirty.Delete(key)
+	return nil
+}
+
+// DeleteAsync removes the key from the in-memory map and marks it as dirty for background flush
+func (pm *PersistMap[T]) DeleteAsync(key string) {
+	// Remove the key from the in-memory xsync.Map
 	pm.data.Delete(key)
+	// Mark the key as dirty
 	pm.dirty.Store(key, struct{}{})
+}
+
+// Delete immediately deletes the key from both WAL and in-memory map
+func (pm *PersistMap[T]) Delete(key string) error {
+	namespacedKey := pm.prefix + key
+	// Write the delete record to WAL immediately
+	if err := pm.store.Delete(namespacedKey); err != nil {
+		return err
+	}
+	// Remove the key from the in-memory xsync.Map
+	pm.data.Delete(key)
+	// Remove the key from the dirty set to avoid re-flushing
+	// pm.dirty.Delete(key)
+	return nil
+}
+
+// DeleteFSync writes a delete record to WAL immediately, flushes to disk (fsync),
+// and updates the in-memory map.
+func (pm *PersistMap[T]) DeleteFSync(key string) error {
+	namespacedKey := pm.prefix + key
+	// Write the delete record to WAL immediately
+	if err := pm.store.Delete(namespacedKey); err != nil {
+		return err
+	}
+	// Flush all pending writes to disk (fsync)
+	if err := pm.store.Flush(); err != nil {
+		return err
+	}
+	// Remove the key from the in-memory xsync.Map
+	pm.data.Delete(key)
+	// Remove the key from the dirty set if present
+	// pm.dirty.Delete(key)
+	return nil
 }
 
 // close stops the background flush goroutine
