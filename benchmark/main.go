@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt" // Используем для форматированного вывода
+	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
@@ -11,10 +11,8 @@ import (
 	"github.com/Jipok/go-persist"
 	"github.com/boltdb/bolt"
 	"github.com/tidwall/buntdb"
-	"github.com/tidwall/lotsa"
 )
 
-// TestStruct – структура для бенчмарков
 type TestStruct struct {
 	Field1 int    `json:"field1"`
 	Field2 string `json:"field2"`
@@ -56,8 +54,8 @@ func benchmarkMapRWMutexStructs() {
 	}
 
 	// --- Benchmark phase: concurrent random reads/writes ---
-	fmt.Print("map+RWMutex  ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	fmt.Print("map+RWMutex       ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		// Select a random key (from pre-populated keys)
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
@@ -92,8 +90,8 @@ func benchmarkSyncMapStructs() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("sync.Map     ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	fmt.Print("sync.Map          ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -111,17 +109,17 @@ func benchmarkSyncMapStructs() {
 	})
 }
 
-// Benchmark for go-persist (structs)
-func benchmarkPersistStructs() {
-	os.Remove("persist.db1")
-	persistStore, err := persist.Open("persist.db1")
+// Benchmark for go-persist using synchronous Set (structs)
+func benchmarkPersistStructsSync() {
+	os.Remove("persist_sync.db1")
+	persistStore, err := persist.Open("persist_sync.db1")
 	if err != nil {
 		panic(err)
 	}
 	// Create a persistent map for TestStruct
 	persistStructMap, _ := persist.Map[TestStruct](persistStore, "test_struct")
 
-	// --- Pre-population phase ---
+	// --- Pre-population phase using Set ---
 	for i := 0; i < prePopCount; i++ {
 		key := strconv.Itoa(i)
 		persistStructMap.Set(key, TestStruct{
@@ -129,16 +127,13 @@ func benchmarkPersistStructs() {
 			Field2: "example struct",
 		})
 	}
-	// Flush pre-populated data
-	persistStructMap.Flush()
-	persistStore.Flush()
 
-	// --- Benchmark phase ---
-	fmt.Print("go-persist   ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	// --- Benchmark phase: synchronous Set ---
+	fmt.Print("go-persist Set    ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
-			// Write operation
+			// Write operation using synchronous Set method
 			persistStructMap.Set(key, TestStruct{
 				Field1: i,
 				Field2: "updated struct",
@@ -147,7 +142,89 @@ func benchmarkPersistStructs() {
 			// Read operation
 			val, ok := persistStructMap.Get(key)
 			if !ok {
-				panic(err)
+				panic("key not found")
+			}
+			_ = val
+		}
+	})
+	persistStore.Close()
+}
+
+// Benchmark for go-persist using asynchronous SetAsync (structs)
+func benchmarkPersistStructsAsync() {
+	os.Remove("persist.db1")
+	persistStore, err := persist.Open("persist.db1")
+	if err != nil {
+		panic(err)
+	}
+	// Create a persistent map for TestStruct
+	persistStructMap, _ := persist.Map[TestStruct](persistStore, "test_struct")
+
+	// --- Pre-population phase using SetAsync ---
+	for i := 0; i < prePopCount; i++ {
+		key := strconv.Itoa(i)
+		persistStructMap.SetAsync(key, TestStruct{
+			Field1: i,
+			Field2: "example struct",
+		})
+	}
+
+	// --- Benchmark phase: asynchronous SetAsync ---
+	fmt.Print("go-persist Async  ")
+	Ops(benchOps, goroutines, func(i, thread int) {
+		key := strconv.Itoa(rand.Intn(prePopCount))
+		if rand.Intn(100) < writePerc {
+			// Write operation using SetAsync
+			persistStructMap.SetAsync(key, TestStruct{
+				Field1: i,
+				Field2: "updated struct",
+			})
+		} else {
+			// Read operation
+			val, ok := persistStructMap.Get(key)
+			if !ok {
+				panic("key not found")
+			}
+			_ = val
+		}
+	})
+	persistStore.Close()
+}
+
+// Benchmark for go-persist using SetFSync (structs)
+func benchmarkPersistStructsFSync() {
+	os.Remove("persist_fsync.db1")
+	persistStore, err := persist.Open("persist_fsync.db1")
+	if err != nil {
+		panic(err)
+	}
+	// Create a persistent map for TestStruct
+	persistStructMap, _ := persist.Map[TestStruct](persistStore, "test_struct")
+
+	// --- Pre-population phase using SetFSync ---
+	for i := 0; i < prePopCount; i++ {
+		key := strconv.Itoa(i)
+		persistStructMap.SetFSync(key, TestStruct{
+			Field1: i,
+			Field2: "example struct",
+		})
+	}
+
+	// --- Benchmark phase: SetFSync ---
+	fmt.Print("go-persist FSync  ")
+	Ops(benchOps, goroutines, func(i, thread int) {
+		key := strconv.Itoa(rand.Intn(prePopCount))
+		if rand.Intn(100) < writePerc {
+			// Write operation using SetFSync
+			persistStructMap.SetFSync(key, TestStruct{
+				Field1: i,
+				Field2: "updated struct",
+			})
+		} else {
+			// Read operation
+			val, ok := persistStructMap.Get(key)
+			if !ok {
+				panic("key not found")
 			}
 			_ = val
 		}
@@ -156,9 +233,10 @@ func benchmarkPersistStructs() {
 }
 
 // Benchmark for BuntDB (structs with JSON serialization)
-func benchmarkBuntDBStructs() {
+func benchmarkBuntDBStructs(SyncPolicy buntdb.SyncPolicy) {
 	os.Remove("buntdb.db1")
 	buntDB, err := buntdb.Open("buntdb.db1")
+	buntDB.SetConfig(buntdb.Config{SyncPolicy: SyncPolicy})
 	if err != nil {
 		panic(err)
 	}
@@ -184,8 +262,12 @@ func benchmarkBuntDBStructs() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("buntdb       ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	if SyncPolicy == buntdb.EverySecond {
+		fmt.Print("buntdb            ")
+	} else {
+		fmt.Print("buntdb SyncAlways ")
+	}
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -224,13 +306,13 @@ func benchmarkBuntDBStructs() {
 }
 
 // Benchmark for Bolt (structs with JSON serialization)
-func benchmarkBoltStructs() {
+func benchmarkBoltStructs(NoSync bool) {
 	os.Remove("bolt.db1")
 	db, err := bolt.Open("bolt.db1", 0600, nil)
 	if err != nil {
 		panic(err)
 	}
-	db.NoSync = true
+	db.NoSync = NoSync
 
 	// Create bucket "bench_struct" if not exists
 	err = db.Update(func(tx *bolt.Tx) error {
@@ -262,8 +344,12 @@ func benchmarkBoltStructs() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("bolt         ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	if NoSync {
+		fmt.Print("bolt       NoSync ")
+	} else {
+		fmt.Print("bolt              ")
+	}
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -316,8 +402,8 @@ func benchmarkMapRWMutexStrings() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("map+RWMutex  ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	fmt.Print("map+RWMutex       ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -345,8 +431,8 @@ func benchmarkSyncMapStrings() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("sync.Map     ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	fmt.Print("sync.Map          ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -360,8 +446,8 @@ func benchmarkSyncMapStrings() {
 	})
 }
 
-// Benchmark for go-persist (strings)
-func benchmarkPersistStrings() {
+// Benchmark for go-persist using synchronous Set (strings)
+func benchmarkPersistStringsSync() {
 	os.Remove("persist.db2")
 	persistStore, err := persist.Open("persist.db2")
 	if err != nil {
@@ -370,25 +456,55 @@ func benchmarkPersistStrings() {
 	persistMap, _ := persist.Map[string](persistStore, "test")
 	stringValue := "gq2ip4;9209;4fm2d1d3DJ138D2L38\t2FP2938FP238HFP2H  FDAUWF1\t2"
 
-	// --- Pre-population phase ---
+	// --- Pre-population phase using Set ---
 	for i := 0; i < prePopCount; i++ {
 		key := strconv.Itoa(i)
 		persistMap.Set(key, stringValue)
 	}
-	persistStore.Flush()
 
-	// --- Benchmark phase ---
-	fmt.Print("go-persist   ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	// --- Benchmark phase: synchronous Set ---
+	fmt.Print("go-persist Set    ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
-			// Write operation
 			persistMap.Set(key, stringValue+" updated")
 		} else {
-			// Read operation
 			val, ok := persistMap.Get(key)
 			if !ok {
-				panic(err)
+				panic("key not found")
+			}
+			_ = val
+		}
+	})
+	persistStore.Close()
+}
+
+// Benchmark for go-persist using asynchronous SetAsync (strings)
+func benchmarkPersistStringsAsync() {
+	os.Remove("persist_async.db2")
+	persistStore, err := persist.Open("persist_async.db2")
+	if err != nil {
+		panic(err)
+	}
+	persistMap, _ := persist.Map[string](persistStore, "test")
+	stringValue := "gq2ip4;9209;4fm2d1d3DJ138D2L38\t2FP2938FP238HFP2H  FDAUWF1\t2"
+
+	// --- Pre-population phase using SetAsync ---
+	for i := 0; i < prePopCount; i++ {
+		key := strconv.Itoa(i)
+		persistMap.SetAsync(key, stringValue)
+	}
+
+	// --- Benchmark phase: asynchronous SetAsync ---
+	fmt.Print("go-persist Async  ")
+	Ops(benchOps, goroutines, func(i, thread int) {
+		key := strconv.Itoa(rand.Intn(prePopCount))
+		if rand.Intn(100) < writePerc {
+			persistMap.SetAsync(key, stringValue+" updated")
+		} else {
+			val, ok := persistMap.Get(key)
+			if !ok {
+				panic("key not found")
 			}
 			_ = val
 		}
@@ -418,8 +534,8 @@ func benchmarkBuntDBStrings() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("buntdb       ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	fmt.Print("buntdb            ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -476,8 +592,8 @@ func benchmarkBoltStrings() {
 	}
 
 	// --- Benchmark phase ---
-	fmt.Print("bolt         ")
-	lotsa.Ops(benchOps, goroutines, func(i, thread int) {
+	fmt.Print("bolt       NoSync ")
+	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			// Write operation
@@ -508,44 +624,62 @@ func benchmarkBoltStrings() {
 /////////////////////////////////////////////////////////////////////////////////////////
 
 func main() {
-	lotsa.Output = os.Stdout
-	// lotsa.MemUsage = true // TODO Why wrong values for sync.Map?
+	Output = os.Stdout
+	// MemUsage = true // TODO Why wrong values for sync.Map?
 
 	// Set benchmark constants
 	prePopCount = 100000 // keys for pre-population
-	benchOps = 100000    // number of operations during benchmark phase
-	goroutines = 150     // number of goroutines for lotsa.Ops (actual load)
-	writePerc = 20       // write operations ratio (20% write, 80% read)
+	benchOps = 1000000   // number of operations during benchmark phase
+	goroutines = 150     // number of goroutines for Ops (actual load)
+	writePerc = 20       // write operations ratio
+
+	// Display benchmark configuration
+	fmt.Printf("===== Benchmark Configuration =====\n")
+	fmt.Printf("Pre-populated keys: %s\n", commaize(prePopCount))
+	fmt.Printf("Write/read ratio: %d%% write, %d%% read\n", writePerc, 100-writePerc)
+	fmt.Printf("Operations: %s (across %d goroutines)\n", commaize(benchOps), goroutines)
+	fmt.Println()
 
 	fmt.Println("===== Benchmarking: Structs =====")
-	benchmarkPersistStructs()
+	fmt.Printf("                     Elapsed           Throughput           Avg Latency\n")
+	benchmarkPersistStructsAsync()
 	benchmarkSyncMapStructs()
 	benchmarkMapRWMutexStructs()
-	benchmarkBuntDBStructs()
-	benchmarkBoltStructs()
+	benchmarkPersistStructsSync()
+	benchmarkBuntDBStructs(buntdb.EverySecond) // Like go-persist Async
+	benchmarkBoltStructs(true)
+	// benchmarkPersistStructsFSync()        // SLOW
+	// benchmarkBoltStructs(false)           // Like go-persist FSync
+	// benchmarkBuntDBStructs(buntdb.Always) // Like go-persist FSync
 
-	fmt.Println("\n----- File sizes (MB) -----")
+	fmt.Println("\n----- File sizes for Structs -----")
 	printFileSize("persist.db1")
 	printFileSize("buntdb.db1")
 	printFileSize("bolt.db1")
 
-	fmt.Println("\n===== Benchmarking: Strings =====")
-	benchmarkPersistStrings()
-	benchmarkSyncMapStrings()
-	benchmarkMapRWMutexStrings()
-	benchmarkBuntDBStrings()
-	benchmarkBoltStrings()
+	if true {
+		fmt.Println("\n===== Benchmarking: Strings =====")
+		benchmarkPersistStringsAsync()
+		benchmarkSyncMapStrings()
+		benchmarkMapRWMutexStrings()
+		benchmarkPersistStringsSync()
+		benchmarkBuntDBStrings()
+		benchmarkBoltStrings()
 
-	fmt.Println("\n----- File sizes (MB) -----")
-	printFileSize("persist.db2")
-	printFileSize("test.buntdb")
-	printFileSize("bolt.db2")
+		fmt.Println("\n----- File sizes for Strings -----")
+		printFileSize("persist.db2")
+		printFileSize("test.buntdb")
+		printFileSize("bolt.db2")
+	}
 
 	// Clean up benchmark files
 	os.Remove("persist.db1")
+	os.Remove("persist_sync.db1")
+	os.Remove("persist_fsync.db1")
 	os.Remove("buntdb.db1")
 	os.Remove("bolt.db1")
 	os.Remove("persist.db2")
+	os.Remove("persist_async.db2")
 	os.Remove("test.buntdb")
 	os.Remove("bolt.db2")
 }
