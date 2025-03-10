@@ -48,14 +48,14 @@ func TestStore_SetGetAndDelete(t *testing.T) {
 
 	// Set a key-value pair with struct value
 	// English comment: set the key "structKey" with a struct value
-	if err := store.Set("structKey", ts); err != nil {
+	if err := store.Write("structKey", ts); err != nil {
 		t.Fatalf("failed to set key 'structKey': %v", err)
 	}
 
 	// Get the struct value
 	// English comment: retrieve the struct value and compare with the original
 	var resultStruct testStruct
-	if err := store.Get("structKey", &resultStruct); err != nil {
+	if err := store.Read("structKey", &resultStruct); err != nil {
 		t.Fatalf("failed to get key 'structKey': %v", err)
 	}
 	if resultStruct.A != ts.A || resultStruct.B != ts.B {
@@ -68,7 +68,7 @@ func TestStore_SetGetAndDelete(t *testing.T) {
 	}
 
 	// Getting the deleted struct key should return ErrKeyNotFound
-	if err := store.Get("structKey", &resultStruct); err == nil {
+	if err := store.Read("structKey", &resultStruct); err == nil {
 		t.Fatal("expected error when getting deleted struct key, got nil")
 	} else if !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("expected ErrKeyNotFound error for struct key, got: %v", err)
@@ -82,13 +82,13 @@ func TestStore_Shrink(t *testing.T) {
 	// Set several keys
 	keys := []string{"a", "b", "c"}
 	for i, k := range keys {
-		if err := store.Set(k, i); err != nil {
+		if err := store.Write(k, i); err != nil {
 			t.Fatalf("failed to set key '%s': %v", k, err)
 		}
 	}
 
 	// Overwrite key "a" with a new value
-	if err := store.Set("a", 100); err != nil {
+	if err := store.Write("a", 100); err != nil {
 		t.Fatalf("failed to update key 'a': %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestStore_Shrink(t *testing.T) {
 
 	// Verify that key "a" holds the updated value
 	var valA int
-	if err := store.Get("a", &valA); err != nil {
+	if err := store.Read("a", &valA); err != nil {
 		t.Fatalf("failed to get key 'a': %v", err)
 	}
 	if valA != 100 {
@@ -113,7 +113,7 @@ func TestStore_Shrink(t *testing.T) {
 
 	// Verify that key "c" retains own value
 	var valC int
-	if err := store.Get("c", &valC); err != nil {
+	if err := store.Read("c", &valC); err != nil {
 		t.Fatalf("failed to get key 'c': %v", err)
 	}
 	if valC != 2 {
@@ -122,7 +122,7 @@ func TestStore_Shrink(t *testing.T) {
 
 	// Verify that key "b" (deleted) not found
 	var dummy int
-	if err := store.Get("b", &dummy); err == nil {
+	if err := store.Read("b", &dummy); err == nil {
 		t.Fatal("expected error when getting deleted key 'b', got nil")
 	} else if !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("expected ErrKeyNotFound for key 'b', got: %v", err)
@@ -144,7 +144,7 @@ func TestStore_Concurrent(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < numKeysPerRoutine; j++ {
 				key := "key_" + strconv.Itoa(i) + "_" + strconv.Itoa(j)
-				if err := store.Set(key, j); err != nil {
+				if err := store.Write(key, j); err != nil {
 					t.Errorf("failed to set key '%s': %v", key, err)
 				}
 			}
@@ -157,7 +157,7 @@ func TestStore_Concurrent(t *testing.T) {
 		for j := 0; j < numKeysPerRoutine; j++ {
 			key := "key_" + strconv.Itoa(i) + "_" + strconv.Itoa(j)
 			var value int
-			if err := store.Get(key, &value); err != nil {
+			if err := store.Read(key, &value); err != nil {
 				t.Errorf("failed to get key '%s': %v", key, err)
 			}
 			if value != j {
@@ -215,7 +215,7 @@ func TestStore_IncompleteRecord(t *testing.T) {
 
 	// Test that the complete record for key "complete" is read correctly.
 	var validVal int
-	if err := store.Get("complete", &validVal); err != nil {
+	if err := store.Read("complete", &validVal); err != nil {
 		t.Fatalf("failed to get key 'complete': %v", err)
 	}
 	if validVal != 123 {
@@ -224,7 +224,7 @@ func TestStore_IncompleteRecord(t *testing.T) {
 
 	// Test that attempting to get the incomplete record results in ErrKeyNotFound.
 	var incompleteVal int
-	err = store.Get("incomplete", &incompleteVal)
+	err = store.Read("incomplete", &incompleteVal)
 	if err == nil {
 		t.Fatal("expected error when getting key with incomplete record, got nil")
 	} else if !errors.Is(err, ErrKeyNotFound) {
@@ -287,7 +287,7 @@ func TestStore_RecordValueWithoutNewline(t *testing.T) {
 
 	// Validate that the complete record for key "valid" can be read successfully.
 	var validValue int
-	if err := store.Get("valid", &validValue); err != nil {
+	if err := store.Read("valid", &validValue); err != nil {
 		t.Fatalf("failed to get key 'valid': %v", err)
 	}
 	if validValue != 789 {
@@ -296,7 +296,7 @@ func TestStore_RecordValueWithoutNewline(t *testing.T) {
 
 	// Validate that the incomplete record for key "incomplete" is skipped.
 	var incompleteValue int
-	err = store.Get("incomplete", &incompleteValue)
+	err = store.Read("incomplete", &incompleteValue)
 	if err == nil {
 		t.Fatal("expected error when retrieving key 'incomplete' with incomplete record (missing newline), got nil")
 	} else if !errors.Is(err, ErrKeyNotFound) {
@@ -366,7 +366,7 @@ func TestStore_InvalidRecordMidFile(t *testing.T) {
 	// Attempt to retrieve key "first" which was written before the invalid record.
 	// Expect to get the value 100.
 	var firstVal int
-	if err := store.Get("first", &firstVal); err != nil {
+	if err := store.Read("first", &firstVal); err != nil {
 		t.Errorf("failed to get key 'first': %v", err)
 	}
 	if firstVal != 100 {
@@ -376,7 +376,7 @@ func TestStore_InvalidRecordMidFile(t *testing.T) {
 	// Attempt to retrieve key "second" which was written after the invalid record.
 	// Since the invalid record stops further processing, key "second" should not be found.
 	var secondVal int
-	if err := store.Get("second", &secondVal); err == nil {
+	if err := store.Read("second", &secondVal); err == nil {
 		t.Errorf("expected error for key 'second' due to invalid record mid file, got value %d", secondVal)
 	} else if !errors.Is(err, ErrKeyNotFound) {
 		t.Errorf("expected ErrKeyNotFound for key 'second', got: %v", err)

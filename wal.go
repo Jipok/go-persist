@@ -156,13 +156,13 @@ func (s *Store) Flush() error {
 	return s.f.Sync()
 }
 
-// Set persists a key-value pair by writing a "set" record to the log.
+// Write persists a key-value pair by writing a "set" record to the log.
 // The record format consists of two lines:
 // 1. S <key>
 // 2. <json-serialized-value>
 // The newline after the value serves as a marker that the record was
 // successfully written and can be safely processed during recovery.
-func (s *Store) Set(key string, value interface{}) error {
+func (s *Store) Write(key string, value interface{}) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -232,11 +232,11 @@ func readRecord(reader *bufio.Reader) (op string, key string, value string, err 
 	return op, key, value, nil
 }
 
-// Get retrieves the most recent value for a key by scanning the entire log file.
+// Read retrieves the most recent value for a key by scanning the entire log file.
 // It processes all records sequentially, tracking whether the key was set or deleted.
 // The target parameter must be a pointer where the unmarshalled JSON value will be stored.
 // Returns ErrKeyNotFound if the key doesn't exist or was deleted in the most recent operation.
-func (s *Store) Get(key string, target interface{}) error {
+func (s *Store) Read(key string, target interface{}) error {
 	// Lock for consistency (we use a separate file descriptor for reading)
 	s.mu.Lock()
 	defer s.mu.Unlock()

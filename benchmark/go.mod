@@ -3,7 +3,7 @@ module bench
 go 1.23.6
 
 require (
-	github.com/Jipok/go-persist v1.0.0
+	github.com/Jipok/go-persist v1.1.0
 	github.com/boltdb/bolt v1.3.1
 	github.com/tidwall/buntdb v1.3.2
 )
