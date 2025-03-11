@@ -2,6 +2,20 @@
 
 A high-performance, type-safe, persisted key-value store for Go, leveraging generics and WAL-based persistence.
 
+## Performance
+
+*Benchmark: 1M struct operations over 150 threads, after 100k prefill*
+| Solution           | Operations/sec | ns/op | File Size |
+|--------------------|----------------|-------|-----------|
+| go-persist `Async` | 7,114,784      | 140   | 6.07 MB   |
+| sync.Map           | 5,533,168      | 180   | N/A       |
+| map+RWMutex        | 2,132,890      | 468   | N/A       |
+| go-persist `Set`   | 1,351,765      | 739   | 6.07 MB   |
+| buntdb             | 240,207        | 4163  | 8.41 MB   |
+| bolt       `NoSync`| 179,476        | 5571  | 24.00 MB  |
+
+Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
+
 ## Motivation
 
 At first glance, building yet another key-value store in Go might seem redundant. There are plenty of popular solutions already available — Bolt, BuntDB, Badger, Pebble, Bbolt and others, each with its particular strengths. However, my experience has consistently demonstrated a fundamental mismatch between what's readily available and what many Go applications actually need.
@@ -22,26 +36,12 @@ The result is a solution that combines the best of both worlds:
 
 - Type-safe semantics: no manual marshaling/unmarshaling in your code
 - Near-native concurrent performance: on par with `sync.Map`
-- Human-readable persistent storage: JSON-based WAL (Write-Ahead Logs), easy to inspect or debug
+- Human-readable persistent storage: JSON-based WAL (Write-Ahead Log), easy to inspect or debug
 - Compact and predictable file sizes compared to traditional approaches
 
 Ultimately, `go-persist` was born from real-world pain point, eliminating the unnecessary layers of complexity, duplication of logic, and serialization overhead endemic to traditional solutions.
 
-## Performance
-
-*Benchmark: 1M struct operations over 150 threads, after 100k prefill*
-| Solution           | Operations/sec | ns/op | File Size |
-|--------------------|----------------|-------|-----------|
-| go-persist `Async` | 7,114,784      | 140   | 6.07 MB   |
-| sync.Map           | 5,533,168      | 180   | N/A       |
-| map+RWMutex        | 2,132,890      | 468   | N/A       |
-| go-persist `Set`   | 1,351,765      | 739   | 6.07 MB   |
-| buntdb             | 240,207        | 4163  | 8.41 MB   |
-| bolt       `NoSync`| 179,476        | 5571  | 24.00 MB  |
-
-Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
-
-## Human-readable and writable Write-Ahead Log format:
+### Human-readable and writable Write-Ahead Log format:
 
 ```bash
 go-persist 1                                          # Version header
@@ -60,13 +60,11 @@ S key2                                                # New version of key2
 - `D key` - Delete operation
 - **Values**: Stored as standard JSON on the line after the operation
 
-## Installation
+## Get Started
 
 ```bash
 go get github.com/Jipok/go-persist
 ```
-
-## Usage Examples
 
 ### Using PersistMap (Type-Safe API)
 
@@ -261,8 +259,8 @@ go-persist offers multiple durability options to balance performance and data sa
 ### Configuring Sync Interval
 
 The sync interval controls:
-* When batched Async operations are written to the WAL file
-* When regular Set operations are synced from OS page cache to physical disk
+* When batched `Async` operations are written to the WAL file
+* When regular `Set` operations are synced from OS page cache to physical disk
 
 ```go
 // Get the current sync interval
