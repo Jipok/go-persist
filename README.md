@@ -2,7 +2,7 @@
 
 A high-performance, type-safe, persisted key-value store for Go, leveraging generics and WAL-based persistence.
 
-# Motivation
+## Motivation
 
 At first glance, building yet another key-value store in Go might seem redundant. There are plenty of popular solutions already available — Bolt, BuntDB, Badger, Pebble, Bbolt and others, each with its particular strengths. However, my experience has consistently demonstrated a fundamental mismatch between what's readily available and what many Go applications actually need.
 
@@ -98,55 +98,76 @@ func main() {
     if err := store.Shrink(); err != nil {
         log.Fatal(err)
     }
-    
+
     // Create or load a typed map
     users, err := persist.Map[User](store, "users")
     if err != nil {
         log.Fatal(err)
     }
-    
+
     // Store a user (with different durability options)
-    
+
     // Option 1: High Performance (background flush - fastest)
     users.SetAsync("john", User{
-        Name: "John Doe", 
-        Email: "john@example.com", 
+        Name: "John Doe",
+        Email: "john@example.com",
         Age: 30,
     })
-    
+
     // Recommended
     // Option 2: Immediate WAL Write (balanced durability)
     users.Set("alice", User{
-        Name: "Alice Smith", 
-        Email: "alice@example.com", 
+        Name: "Alice Smith",
+        Email: "alice@example.com",
         Age: 28,
     })
-    
+
     // Option 3: Maximum Durability (with fsync - slowest)
     err = users.SetFSync("bob", User{
-        Name: "Bob Johnson", 
-        Email: "bob@example.com", 
+        Name: "Bob Johnson",
+        Email: "bob@example.com",
         Age: 35,
     })
     if err != nil {
         log.Fatal(err)
     }
-    
+
     // Retrieve a user
     john, ok := users.Get("john")
     if !ok {
         log.Fatal("User not found")
     }
     fmt.Printf("User: %+v\n", john)
-    
+
     // Delete a user (also with durability options)
     users.DeleteAsync("john")  // Background delete (fastest)
     users.Delete("alice")      // Immediate WAL write
-    
+
     err = users.DeleteFSync("bob")  // Maximum durability with fsync
     if err != nil {
         log.Fatal(err)
     }
+
+    // Atomic updates
+    // There are also UpdateAsync and UpdateFSync
+    users.Update("sam", func(current User, exists bool) (User, bool) {
+        if !exists {
+            // Create new user if doesn't exist
+            return User{Name: "Sam Wilson", Age: 25}, false
+        }
+        // Modify existing user
+        current.Age++
+        return current, false // Return updated value, don't delete
+    })
+
+    count := users.Size()
+    fmt.Printf("User count: %d\n", count)
+
+    // Iterate through all users
+    users.Range(func(key string, value User) bool {
+        fmt.Printf("Key: %s, User: %+v\n", key, value)
+        return true // continue iteration
+    })
 }
 ```
 
@@ -162,7 +183,7 @@ defer store.Close()
 
 // Create typed maps for different entity types
 users, err := persist.Map[User](store, "users")
-products, err := persist.Map[Product](store, "products") 
+products, err := persist.Map[Product](store, "products")
 sessions, err := persist.Map[Session](store, "sessions")
 
 // Use independently
@@ -190,7 +211,7 @@ func main() {
     if err := store.Shrink(); err != nil {
         log.Fatal(err)
     }
-    
+
     // Store configuration directly
     err = store.Write("system_config", Config{
         Debug:          true,
@@ -199,8 +220,8 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    
-    // NOTE: store.Read reads the entire WAL and should primarily be 
+
+    // NOTE: store.Read reads the entire WAL and should primarily be
     // used for initial loading at program start, not frequent access
     var config Config
     err = store.Read("system_config", &config)
@@ -208,7 +229,7 @@ func main() {
         log.Fatal(err)
     }
     fmt.Printf("Config: Debug=%v, MaxConnections=%d\n", config.Debug, config.MaxConnections)
-    
+
     // When you need to update the config
     config.MaxConnections = 200
     err = store.Write("system_config", config)
@@ -222,17 +243,17 @@ func main() {
 
 go-persist offers multiple durability options to balance performance and data safety:
 
-1. **Async Methods** (`SetAsync`, `DeleteAsync`): Highest performance with deferred persistence. 
+1. **Async Methods** (`SetAsync`, `DeleteAsync`, `UpdateAsync`): Highest performance with deferred persistence.
    - Updates are applied in-memory immediately
    - Changes are flushed to disk by a background process
    - Best for high-throughput scenarios where occasional data loss on crashes is acceptable
 
-2. **Immediate Methods** (`Set`, `Delete`): Balanced performance with immediate WAL updates.
+2. **Immediate Methods** (`Set`, `Delete`, `Update`): Balanced performance with immediate WAL updates.
    - Updates are applied in-memory and written to WAL immediately
    - Safe against application crashes, but susceptible to system crashes
    - Good for most typical use cases
 
-3. **FSync Methods** (`SetFSync`, `DeleteFSync`): Maximum durability with fsync guarantee.
+3. **FSync Methods** (`SetFSync`, `DeleteFSync`, `UpdateFSync`): Maximum durability with fsync guarantee.
    - Updates are written to WAL and flushed to physical disk with fsync
    - Safe against both application and system crashes
    - Use when data integrity is critical
@@ -272,7 +293,8 @@ For the `Set` method, even with a very long sync interval, changes are initially
 - Applications requiring persistence with minimal overhead
 - Working with typed data structures
 - When data inspection and debugging are important
-- For heavy workloads(consider background flush interval)
+- For heavy workloads (consider background flush interval)
+- When atomic update operations are needed
 
 ## Limitations
 

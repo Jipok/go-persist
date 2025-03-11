@@ -126,6 +126,7 @@ func Open(path string) (*Store, error) {
 
 // Saves all pending changes and stops the background flush goroutine
 // Then closes the underlying file.
+//
 // The Store should not be used after calling Close.
 func (s *Store) Close() error {
 	// Signal background FSyncAll to stop and wait for it to finish
@@ -140,7 +141,9 @@ func (s *Store) Close() error {
 }
 
 // FSyncAll ensures complete data durability by:
+//
 // 1. Synchronizing all dirty map entries to the WAL file
+//
 // 2. Performing an fsync operation to guarantee data is physically written to disk
 //
 // This operation provides the strongest durability guarantee, protecting against

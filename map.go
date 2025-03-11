@@ -19,6 +19,8 @@ type PersistMap[T any] struct {
 	dirty  *xsync.Map // set of dirty keys; value is struct{} as a dummy
 }
 
+// Map creates or loads PersistMap from store.
+//
 // PersistMap represents a thread-safe persistent key-value store with type-safe values.
 // It maintains an in-memory map for fast access while ensuring durability through the WAL.
 // All values are validated during loading by ensuring they can be unmarshalled into type T.
@@ -132,7 +134,9 @@ func (pm *PersistMap[T]) load() error {
 	return nil
 }
 
-// Get retrieves the value associated with the key from the in-memory map
+// Get retrieves the value associated with the key from the in-memory map.
+//
+// Returns the value and true if the key exists, or a zero value and false otherwise.
 func (pm *PersistMap[T]) Get(key string) (T, bool) {
 	value, ok := pm.data.Load(key)
 	if !ok {
@@ -148,6 +152,7 @@ func (pm *PersistMap[T]) Get(key string) (T, bool) {
 }
 
 // SetAsync updates the in-memory map and marks the key as dirty.
+//
 // Its actual persistence is deferred to a background flush, providing higher performance
 // at the cost of delayed durability.
 func (pm *PersistMap[T]) SetAsync(key string, value T) {
@@ -158,6 +163,7 @@ func (pm *PersistMap[T]) SetAsync(key string, value T) {
 }
 
 // Set updates both in-memory data and WAL file immediately, but without fsync.
+//
 // Safe for application crashes, as WAL ensures recovery, but may lose updates
 // during system crashes if data remains in OS cache.
 func (pm *PersistMap[T]) Set(key string, value T) {
@@ -171,6 +177,7 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 }
 
 // SetFSync updates in-memory data, WAL file, and forces physical disk write with fsync.
+//
 // Most durable option that protects against both application and system crashes,
 // but with highest performance cost.
 func (pm *PersistMap[T]) SetFSync(key string, value T) error {
@@ -222,6 +229,108 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	// Remove the key from the in-memory xsync.Map
 	pm.data.Delete(key)
 	return nil
+}
+
+// UpdateAsync atomically updates a key using the updater function.
+//
+// It only updates the in-memory value and marks the key as dirty so that background FSyncAll
+// will eventually persist the change.
+//
+// The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
+// and should return the new value and a flag indicating whether to delete the key.
+func (pm *PersistMap[T]) UpdateAsync(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool) {
+	// Atomically update the in-memory map
+	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
+		var current T
+		if loaded {
+			current = oldValue.(T)
+		}
+		// updater returns (newValue, delete)
+		return updater(current, loaded)
+	})
+	// Always mark the key as dirty for eventual WAL persistence
+	pm.dirty.Store(key, struct{}{})
+
+	// If Compute indicates deletion, return zero value and false
+	if !ok {
+		var zero T
+		return zero, false
+	}
+	return newValIface.(T), true
+}
+
+// Update atomically updates the value for the given key using the updater function,
+// and immediately writes the change to the WAL (without forcing disk fsync).
+//
+// The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
+// and should return the new value and a flag indicating whether to delete the key.
+func (pm *PersistMap[T]) Update(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool) {
+	// Atomically update the in-memory map
+	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
+		var current T
+		if loaded {
+			current = oldValue.(T)
+		}
+		return updater(current, loaded)
+	})
+	namespacedKey := pm.prefix + key
+	// If updater signaled deletion, write a delete record
+	if !ok {
+		if err := pm.store.Delete(namespacedKey); err != nil {
+			pm.store.ErrorHandler(err)
+		}
+		pm.dirty.Store(key, struct{}{})
+		var zero T
+		return zero, false
+	}
+	// Write a set record to WAL
+	if err := pm.store.Write(namespacedKey, newValIface.(T)); err != nil {
+		pm.store.ErrorHandler(err)
+	}
+	pm.dirty.Store(key, struct{}{})
+	return newValIface.(T), true
+}
+
+// UpdateFSync atomically updates a key using the updater function, writes to the WAL, and forces a physical disk flush (fsync).
+//
+// Offers maximum durability against both application and system crashes, but with the highest performance cost.
+//
+// The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
+// and should return the new value and a flag indicating whether to delete the key.
+func (pm *PersistMap[T]) UpdateFSync(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool, err error) {
+	// Atomically update the in-memory map
+	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
+		var current T
+		if loaded {
+			current = oldValue.(T)
+		}
+		return updater(current, loaded)
+	})
+	namespacedKey := pm.prefix + key
+	// If updater signaled deletion, write a delete record
+	if !ok {
+		if err = pm.store.Delete(namespacedKey); err != nil {
+			var zero T
+			return zero, false, err
+		}
+		pm.dirty.Store(key, struct{}{})
+		if err = pm.store.FSyncAll(); err != nil {
+			var zero T
+			return zero, false, err
+		}
+		var zero T
+		return zero, false, nil
+	}
+	// Write a set record to WAL
+	if err = pm.store.Write(namespacedKey, newValIface.(T)); err != nil {
+		return newValIface.(T), true, err
+	}
+	pm.dirty.Store(key, struct{}{})
+	// Flush (fsync) to ensure durability
+	if err = pm.store.FSyncAll(); err != nil {
+		return newValIface.(T), true, err
+	}
+	return newValIface.(T), true, nil
 }
 
 // Size returns current size of the map

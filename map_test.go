@@ -35,7 +35,6 @@ func TestPersistMap_SetGet(t *testing.T) {
 
 	// Set a value.
 	pm.Set("foo", "bar") // Updated: no error returned
-
 	// Get the value.
 	val, ok := pm.Get("foo")
 	if !ok {
@@ -314,5 +313,154 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 	// Close the reopened store.
 	if err := store2.Close(); err != nil {
 		t.Fatalf("Store close failed on reopened store: %v", err)
+	}
+}
+
+// TestPersistMap_ComplexUpdateOperations performs concurrent Update/UpdateAsync operations,
+// then freezes final state and verifies that the persisted state matches.
+func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
+	// Create a temporary file for the WAL.
+	tmpFile, err := os.CreateTemp("", "persist_map_complex_update_test_*.wal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(path)
+
+	// Open a new WAL store.
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+
+	// Create a PersistMap[int] with namespace "complexUpdate".
+	pm, err := Map[int](store, "complexUpdate")
+	if err != nil {
+		t.Fatalf("Failed to create persist map: %v", err)
+	}
+
+	// Define a set of keys to update.
+	keys := []string{"counter0", "counter1", "counter2", "counter3", "counter4", "counter5", "counter6", "counter7", "counter8", "counter9"}
+
+	var wg sync.WaitGroup
+	numGoroutines := 5
+	iterations := 100
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				// Randomly choose one key.
+				key := keys[rand.Intn(len(keys))]
+				// Randomly choose to use Update (synchronous) or UpdateAsync.
+				useSync := rand.Intn(2) == 0 // 50% chance.
+				// Randomly decide whether to delete the key (20% chance).
+				deletion := rand.Intn(100) < 20
+
+				if useSync {
+					// Using Update method.
+					pm.Update(key, func(current int, exists bool) (int, bool) {
+						if deletion {
+							// Signal deletion.
+							return 0, true
+						}
+						// If exists add a random delta (1..10); if not, initialize with a random value.
+						delta := rand.Intn(10) + 1
+						if exists {
+							return current + delta, false
+						}
+						return delta, false
+					})
+				} else {
+					// Using UpdateAsync method.
+					pm.UpdateAsync(key, func(current int, exists bool) (int, bool) {
+						if deletion {
+							return 0, true
+						}
+						delta := rand.Intn(10) + 1
+						if exists {
+							return current + delta, false
+						}
+						return delta, false
+					})
+				}
+				// Small sleep to increase concurrency variability.
+				time.Sleep(time.Microsecond)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Freeze final state: for each key, if its index is even, set it to a fixed value,
+	// if odd, remove the key.
+	for i, key := range keys {
+		if i%2 == 0 {
+			// Update key to have a known constant value (e.g. i * 100).
+			pm.Update(key, func(current int, exists bool) (int, bool) {
+				return i * 100, false
+			})
+		} else {
+			// Force deletion of the key.
+			pm.Update(key, func(current int, exists bool) (int, bool) {
+				return 0, true
+			})
+		}
+	}
+
+	// Verify in-memory final state.
+	for i, key := range keys {
+		if i%2 == 0 {
+			// For even-indexed keys, the value should be exactly i*100.
+			val, ok := pm.Get(key)
+			if !ok {
+				t.Fatalf("Final state: expected key %s to exist", key)
+			}
+			expected := i * 100
+			if val != expected {
+				t.Errorf("Final state: for key %s expected %d, got %d", key, expected, val)
+			}
+		} else {
+			// For odd-indexed keys, the key should be deleted.
+			if _, ok := pm.Get(key); ok {
+				t.Errorf("Final state: expected key %s to be deleted", key)
+			}
+		}
+	}
+
+	// Close the store to flush all operations.
+	if err := store.Close(); err != nil {
+		t.Fatalf("Store close failed: %v", err)
+	}
+
+	// ---------- Reopen store and verify that persisted state matches ----------
+
+	store2, err := Open(path)
+	if err != nil {
+		t.Fatalf("Failed to reopen store: %v", err)
+	}
+	defer store2.Close()
+	pmReloaded, err := Map[int](store2, "complexUpdate")
+	if err != nil {
+		t.Fatalf("Failed to reload persist map: %v", err)
+	}
+
+	// Validate persisted state.
+	for i, key := range keys {
+		if i%2 == 0 {
+			val, ok := pmReloaded.Get(key)
+			if !ok {
+				t.Fatalf("Reloaded state: expected key %s to exist", key)
+			}
+			expected := i * 100
+			if val != expected {
+				t.Errorf("Reloaded state: for key %s expected %d, got %d", key, expected, val)
+			}
+		} else {
+			if _, ok := pmReloaded.Get(key); ok {
+				t.Errorf("Reloaded state: expected key %s to be deleted", key)
+			}
+		}
 	}
 }
