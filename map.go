@@ -42,14 +42,19 @@ func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
 	return pm, nil
 }
 
-// Persists all dirty keys to the WAL
-// Automatically called from store BackgroundSync
-func (pm *PersistMap[T]) Flush() {
+// Sync writes all pending changes made by Async methods to the WAL file.
+// It processes all keys marked as dirty, persisting their current values or
+// deletion status, then clears their dirty flags upon successful write.
+//
+// Sync is automatically called periodically from the store's background
+// synchronization process. This method only ensures consistency between
+// memory and the WAL file, but doesn't guarantee data is physically
+// written to disk - that step is handled by the Store.Flush method.
+func (pm *PersistMap[T]) Sync() {
 	// Iterate over dirty keys in the set
 	pm.dirty.Range(func(key string, _ interface{}) bool {
 		namespacedKey := pm.prefix + key
 
-		// Using Compute on dirty map to atomically perform WAL update and remove the dirty flag
 		pm.dirty.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 			// Lock is taken for this key. Now we can read the in-memory value.
 			if v, ok := pm.data.Load(key); ok {
@@ -175,7 +180,7 @@ func (pm *PersistMap[T]) SetFSync(key string, value T) error {
 		return err
 	}
 	// Flush all pending writes to disk (fsync)
-	if err := pm.store.Flush(); err != nil {
+	if err := pm.store.FSyncAll(); err != nil {
 		return err
 	}
 	// Update in-memory xsync.Map
@@ -211,7 +216,7 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 		return err
 	}
 	// Flush all pending writes to disk (fsync)
-	if err := pm.store.Flush(); err != nil {
+	if err := pm.store.FSyncAll(); err != nil {
 		return err
 	}
 	// Remove the key from the in-memory xsync.Map

@@ -101,12 +101,7 @@ func Open(path string) (*Store, error) {
 		log.Fatal("go-persist: ", err)
 	}
 
-	s.startBackgroundSync()
-	return s, nil
-}
-
-// Flush writes periodically
-func (s *Store) startBackgroundSync() {
+	// Start background FSyncAll
 	s.wg.Add(1)
 	go func() {
 		timer := time.NewTimer(s.GetSyncInterval())
@@ -115,7 +110,7 @@ func (s *Store) startBackgroundSync() {
 		for {
 			select {
 			case <-timer.C:
-				err := s.Flush()
+				err := s.FSyncAll()
 				if err != nil {
 					s.ErrorHandler(fmt.Errorf("background sync failed: %s", err))
 				}
@@ -125,29 +120,38 @@ func (s *Store) startBackgroundSync() {
 			}
 		}
 	}()
+
+	return s, nil
 }
 
 // Saves all pending changes and stops the background flush goroutine
 // Then closes the underlying file.
 // The Store should not be used after calling Close.
 func (s *Store) Close() error {
-	// Signal background sync to stop and wait for it to finish
+	// Signal background FSyncAll to stop and wait for it to finish
 	close(s.stopSync)
 	s.wg.Wait()
 
-	err := s.Flush()
+	err := s.FSyncAll()
 	if err != nil {
 		return err
 	}
 	return s.f.Close()
 }
 
-// Flushes all pending writes to disk immediately
-func (s *Store) Flush() error {
+// FSyncAll ensures complete data durability by:
+// 1. Synchronizing all dirty map entries to the WAL file
+// 2. Performing an fsync operation to guarantee data is physically written to disk
+//
+// This operation provides the strongest durability guarantee, protecting against
+// both application crashes and system failures. It's automatically called
+// periodically based on the configured syncInterval, but can also be called
+// manually when immediate durability is required.
+func (s *Store) FSyncAll() error {
 	// Flush Maps
 	s.persistMaps.Range(func(key string, val interface{}) bool {
-		pm, _ := val.(interface{ Flush() })
-		pm.Flush()
+		pm, _ := val.(interface{ Sync() })
+		pm.Sync()
 		return true
 	})
 	// Flush file
