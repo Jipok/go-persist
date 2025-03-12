@@ -340,3 +340,21 @@ func (pm *PersistMap[T]) Range(f func(key string, value T) bool) {
 		return f(key, value.(T))
 	})
 }
+
+// Close unregisters the PersistMap from its parent store and releases all internal resources.
+// After calling Close, the PersistMap becomes invalid and should no longer be used.
+// Multiple calls to Close are safe, with subsequent calls having no effect.
+func (pm *PersistMap[T]) Close() {
+	if pm.store == nil {
+		return
+	}
+
+	mapName, _ := strings.CutPrefix(pm.prefix, ":")
+	pm.store.persistMaps.Delete(mapName)
+
+	pm.Sync()
+
+	pm.store = nil
+	pm.data = nil
+	pm.dirty = nil
+}
