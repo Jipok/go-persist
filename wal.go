@@ -175,11 +175,12 @@ func (s *Store) Write(key string, value interface{}) error {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	header := "S " + key + "\n"
 	line := string(data) + "\n"
+
+	// TODO m.b. RLock? Write syscall for O_APPEND must be threadsafe
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if _, err = s.f.Write([]byte(header + line)); err != nil {
 		return err

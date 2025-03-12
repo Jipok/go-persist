@@ -7,12 +7,12 @@ A high-performance, type-safe, persisted key-value store for Go, leveraging gene
 *Benchmark: 1M struct operations over 150 threads, after 100k prefill*
 | Solution           | Operations/sec | ns/op | File Size |
 |--------------------|----------------|-------|-----------|
-| go-persist `Async` | 7,114,784      | 140   | 6.07 MB   |
-| sync.Map           | 5,533,168      | 180   | N/A       |
-| map+RWMutex        | 2,132,890      | 468   | N/A       |
-| go-persist `Set`   | 1,351,765      | 739   | 6.07 MB   |
-| buntdb             | 240,207        | 4163  | 8.41 MB   |
-| bolt       `NoSync`| 179,476        | 5571  | 24.00 MB  |
+| go-persist `Async` | 7,117,079      | 140   | 6.07 MB   |
+| sync.Map           | 5,509,706      | 181   | N/A       |
+| map+RWMutex        | 2,532,314      | 394   | N/A       |
+| go-persist `Set`   | 1,463,708      | 683   | 6.07 MB   |
+| buntdb             | 251,218        | 3980  | 11.15 MB  |
+| bolt       `NoSync`| 181,481        | 5510  | 24.00 MB  |
 
 Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
 

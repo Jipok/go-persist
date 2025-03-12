@@ -58,22 +58,22 @@ func (pm *PersistMap[T]) Sync() {
 		namespacedKey := pm.prefix + key
 
 		pm.dirty.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
-			// Lock is taken for this key. Now we can read the in-memory value.
+			// Lock is taken for this key. Now we can read the in-memory value
 			if v, ok := pm.data.Load(key); ok {
 				// Try persisting the current value in WAL
 				if err := pm.store.Write(namespacedKey, v); err != nil {
 					log.Println("go-persist: Background flush set failed for key:", key, "error:", err)
-					// Return oldValue and false, so that the dirty flag is not removed.
+					// Return oldValue and false, so that the dirty flag is not removed
 					return oldValue, false
 				}
 			} else {
-				// If the key is no longer in data, try to delete it from WAL.
+				// If the key is no longer in data, try to delete it from WAL
 				if err := pm.store.Delete(namespacedKey); err != nil {
 					log.Println("go-persist: Background flush delete failed for key:", key, "error:", err)
 					return oldValue, false
 				}
 			}
-			// WAL update succeeded; return nil and true to delete the dirty flag.
+			// WAL update succeeded; return nil and true to delete the dirty flag
 			return nil, true
 		})
 
@@ -167,13 +167,15 @@ func (pm *PersistMap[T]) SetAsync(key string, value T) {
 // Safe for application crashes, as WAL ensures recovery, but may lose updates
 // during system crashes if data remains in OS cache.
 func (pm *PersistMap[T]) Set(key string, value T) {
-	namespacedKey := pm.prefix + key
-	// Write the set record to disk(page cache) immediately
-	if err := pm.store.Write(namespacedKey, value); err != nil {
-		pm.store.ErrorHandler(err)
-	}
-	// Update in-memory xsync.Map
-	pm.data.Store(key, value)
+	pm.data.Compute(key, func(oldValue interface{}, loaded bool) (newValue interface{}, delete bool) {
+		namespacedKey := pm.prefix + key
+		// Write S record to disk(page cache) immediately
+		if err := pm.store.Write(namespacedKey, value); err != nil {
+			pm.store.ErrorHandler(err)
+		}
+		// Update in-memory xsync.Map
+		return value, false
+	})
 }
 
 // SetFSync updates in-memory data, WAL file, and forces physical disk write with fsync.
@@ -181,18 +183,9 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 // Most durable option that protects against both application and system crashes,
 // but with highest performance cost.
 func (pm *PersistMap[T]) SetFSync(key string, value T) error {
-	namespacedKey := pm.prefix + key
-	// Write the set record to disk immediately
-	if err := pm.store.Write(namespacedKey, value); err != nil {
-		return err
-	}
+	pm.Set(key, value)
 	// Flush all pending writes to disk (fsync)
-	if err := pm.store.FSyncAll(); err != nil {
-		return err
-	}
-	// Update in-memory xsync.Map
-	pm.data.Store(key, value)
-	return nil
+	return pm.store.FSyncAll()
 }
 
 // DeleteAsync removes the key from the in-memory map and marks it as dirty for background flush
@@ -205,30 +198,23 @@ func (pm *PersistMap[T]) DeleteAsync(key string) {
 
 // Delete immediately deletes the key from both WAL and in-memory map
 func (pm *PersistMap[T]) Delete(key string) {
-	namespacedKey := pm.prefix + key
-	// Write the delete record to WAL immediately
-	if err := pm.store.Delete(namespacedKey); err != nil {
-		pm.store.ErrorHandler(err)
-	}
-	// Remove the key from the in-memory xsync.Map
-	pm.data.Delete(key)
+	pm.data.Compute(key, func(oldValue interface{}, loaded bool) (newValue interface{}, delete bool) {
+		namespacedKey := pm.prefix + key
+		// Write D record to disk(page cache) immediately
+		if err := pm.store.Delete(namespacedKey); err != nil {
+			pm.store.ErrorHandler(err)
+		}
+		// Remove the key from the in-memory xsync.Map
+		return oldValue, true
+	})
 }
 
 // DeleteFSync writes a delete record to WAL immediately, flushes to disk (fsync),
 // and updates the in-memory map.
 func (pm *PersistMap[T]) DeleteFSync(key string) error {
-	namespacedKey := pm.prefix + key
-	// Write the delete record to WAL immediately
-	if err := pm.store.Delete(namespacedKey); err != nil {
-		return err
-	}
+	pm.Delete(key)
 	// Flush all pending writes to disk (fsync)
-	if err := pm.store.FSyncAll(); err != nil {
-		return err
-	}
-	// Remove the key from the in-memory xsync.Map
-	pm.data.Delete(key)
-	return nil
+	return pm.store.FSyncAll()
 }
 
 // UpdateAsync atomically updates a key using the updater function.
@@ -238,6 +224,11 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 //
 // The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
 // and should return the new value and a flag indicating whether to delete the key.
+//
+// This call locks a hash table bucket while the updater function
+// is executed. It means that modifications on other entries in
+// the bucket will be blocked until the updater executes. Consider
+// this when the function includes long-running operations.
 func (pm *PersistMap[T]) UpdateAsync(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool) {
 	// Atomically update the in-memory map
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
@@ -264,30 +255,39 @@ func (pm *PersistMap[T]) UpdateAsync(key string, updater func(current T, exists 
 //
 // The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
 // and should return the new value and a flag indicating whether to delete the key.
-func (pm *PersistMap[T]) Update(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool) {
-	// Atomically update the in-memory map
+//
+// This call locks a hash table bucket while the updater function
+// is executed. It means that modifications on other entries in
+// the bucket will be blocked until the updater executes. Consider
+// this when the function includes long-running operations.
+func (pm *PersistMap[T]) Update(key string, updater func(current T, exists bool) (newValue T, doDelete bool)) (newValue T, existed bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
 			current = oldValue.(T)
 		}
-		return updater(current, loaded)
-	})
-	namespacedKey := pm.prefix + key
-	// If updater signaled deletion, write a delete record
-	if !ok {
-		if err := pm.store.Delete(namespacedKey); err != nil {
-			pm.store.ErrorHandler(err)
+		result, doDelete := updater(current, loaded)
+		namespacedKey := pm.prefix + key
+		if doDelete {
+			// Write D record atomically inside Compute callback
+			if err := pm.store.Delete(namespacedKey); err != nil {
+				pm.store.ErrorHandler(err)
+			}
+			// Returning true signals removal of the key from the map
+			return nil, true
+		} else {
+			// Write S record atomically inside Compute callback
+			if err := pm.store.Write(namespacedKey, result); err != nil {
+				pm.store.ErrorHandler(err)
+			}
+			// Returning false signals that the key should be kept in the map
+			return result, false
 		}
-		pm.dirty.Store(key, struct{}{})
+	})
+	if !ok {
 		var zero T
 		return zero, false
 	}
-	// Write a set record to WAL
-	if err := pm.store.Write(namespacedKey, newValIface.(T)); err != nil {
-		pm.store.ErrorHandler(err)
-	}
-	pm.dirty.Store(key, struct{}{})
 	return newValIface.(T), true
 }
 
@@ -297,40 +297,16 @@ func (pm *PersistMap[T]) Update(key string, updater func(current T, exists bool)
 //
 // The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
 // and should return the new value and a flag indicating whether to delete the key.
+//
+// This call locks a hash table bucket while the updater function
+// is executed. It means that modifications on other entries in
+// the bucket will be blocked until the updater executes. Consider
+// this when the function includes long-running operations.
 func (pm *PersistMap[T]) UpdateFSync(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool, err error) {
-	// Atomically update the in-memory map
-	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
-		var current T
-		if loaded {
-			current = oldValue.(T)
-		}
-		return updater(current, loaded)
-	})
-	namespacedKey := pm.prefix + key
-	// If updater signaled deletion, write a delete record
-	if !ok {
-		if err = pm.store.Delete(namespacedKey); err != nil {
-			var zero T
-			return zero, false, err
-		}
-		pm.dirty.Store(key, struct{}{})
-		if err = pm.store.FSyncAll(); err != nil {
-			var zero T
-			return zero, false, err
-		}
-		var zero T
-		return zero, false, nil
-	}
-	// Write a set record to WAL
-	if err = pm.store.Write(namespacedKey, newValIface.(T)); err != nil {
-		return newValIface.(T), true, err
-	}
-	pm.dirty.Store(key, struct{}{})
+	newValue, existed = pm.Update(key, updater)
 	// Flush (fsync) to ensure durability
-	if err = pm.store.FSyncAll(); err != nil {
-		return newValIface.(T), true, err
-	}
-	return newValIface.(T), true, nil
+	err = pm.store.FSyncAll()
+	return
 }
 
 // Size returns current size of the map
