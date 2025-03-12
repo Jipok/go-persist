@@ -2,20 +2,6 @@
 
 A high-performance, type-safe, persisted key-value store for Go, leveraging generics and WAL-based persistence.
 
-## Performance
-
-*Benchmark: 1M struct operations over 150 threads, after 100k prefill*
-| Solution           | Operations/sec | ns/op | File Size |
-|--------------------|----------------|-------|-----------|
-| go-persist `Async` | 7,117,079      | 140   | 6.07 MB   |
-| sync.Map           | 5,509,706      | 181   | N/A       |
-| map+RWMutex        | 2,532,314      | 394   | N/A       |
-| go-persist `Set`   | 1,463,708      | 683   | 6.07 MB   |
-| buntdb             | 251,218        | 3980  | 11.15 MB  |
-| bolt       `NoSync`| 181,481        | 5510  | 24.00 MB  |
-
-Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
-
 ## Motivation
 
 At first glance, building yet another key-value store in Go might seem redundant. There are plenty of popular solutions already available — Bolt, BuntDB, Badger, Pebble, Bbolt and others, each with its particular strengths. However, my experience has consistently demonstrated a fundamental mismatch between what's readily available and what many Go applications actually need.
@@ -32,41 +18,27 @@ I created `go-persist` because I wanted a better way: a persistent store as simp
 
 With the introduction of Generics in recent Go versions and the availability of advanced concurrent maps ([`xsync.Map`](https://github.com/puzpuzpuz/xsync?tab=readme-ov-file#map)), it became feasible to maintain type safety and near-native `sync.Map` performance without sacrificing persistence guarantees. Unlike traditional databases which serialize everything to strings or byte arrays, `go-persist` keeps data as native Go types in memory, automatically handling JSON serialization transparently only during persistence.
 
-The result is a solution that combines the best of both worlds:
+## Performance
 
-- Type-safe semantics: no manual marshaling/unmarshaling in your code
-- Near-native concurrent performance: on par with `sync.Map`
-- Human-readable persistent storage: JSON-based WAL (Write-Ahead Log), easy to inspect or debug
-- Compact and predictable file sizes compared to traditional approaches
+*Benchmark: 1M struct operations over 150 threads, after 100k prefill*
+| Solution           | Operations/sec | ns/op | File Size |
+|--------------------|----------------|-------|-----------|
+| go-persist `Async` | 7,117,079      | 140   | 6.07 MB   |
+| sync.Map           | 5,509,706      | 181   | N/A       |
+| map+RWMutex        | 2,532,314      | 394   | N/A       |
+| go-persist `Set`   | 1,463,708      | 683   | 6.07 MB   |
+| buntdb             | 251,218        | 3980  | 11.15 MB  |
+| bolt       `NoSync`| 181,481        | 5510  | 24.00 MB  |
 
-Ultimately, `go-persist` was born from real-world pain point, eliminating the unnecessary layers of complexity, duplication of logic, and serialization overhead endemic to traditional solutions.
+Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
 
-### Human-readable and writable Write-Ahead Log format:
-
-```bash
-go-persist 1                                          # Version header
-S key1                                                # Set operation for key1
-{"Name":"Alice","Age":30,"Email":"alice@example.com"} # Value
-S key2                                                # Set operation for key2
-"some plain string"                                   # Value
-D key1                                                # Delete operation for key1
-                                                      # Empty string for delete op
-S key2                                                # New version of key2
-"some another plain string"                           # Updated value
-
-```
-
-- `S key` - Set operation
-- `D key` - Delete operation
-- **Values**: Stored as standard JSON on the line after the operation
-
-## Get Started
+## Installation
 
 ```bash
 go get github.com/Jipok/go-persist
 ```
 
-### Using PersistMap (Type-Safe API)
+## Quick Start
 
 ```go
 package main
@@ -85,42 +57,28 @@ type User struct {
 }
 
 func main() {
-    // Create or open store
-    store, err := persist.Open("users.db")
+    // Open a single persistent map in one call
+    users, err := persist.OpenSingleMap[User]("users.db")
     if err != nil {
         log.Fatal(err)
     }
-    defer store.Close()
+    defer users.Close()
 
-    // Compact the store periodically to reclaim space
-    if err := store.Shrink(); err != nil {
-        log.Fatal(err)
-    }
-
-    // Create or load a typed map
-    users, err := persist.Map[User](store, "users")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Store a user (with different durability options)
-
-    // Option 1: High Performance (background flush - fastest)
-    users.SetAsync("john", User{
-        Name: "John Doe",
-        Email: "john@example.com",
-        Age: 30,
-    })
-
-    // Recommended
-    // Option 2: Immediate WAL Write (balanced durability)
+    // Store a user with balanced performance/durability
     users.Set("alice", User{
         Name: "Alice Smith",
         Email: "alice@example.com",
         Age: 28,
     })
 
-    // Option 3: Maximum Durability (with fsync - slowest)
+    // High-performance store (background persistence)
+    users.SetAsync("john", User{
+        Name: "John Doe",
+        Email: "john@example.com",
+        Age: 30,
+    })
+
+    // Maximum durability store (with fsync)
     err = users.SetFSync("bob", User{
         Name: "Bob Johnson",
         Email: "bob@example.com",
@@ -136,60 +94,130 @@ func main() {
         log.Fatal("User not found")
     }
     fmt.Printf("User: %+v\n", john)
-
-    // Delete a user (also with durability options)
-    users.DeleteAsync("john")  // Background delete (fastest)
-    users.Delete("alice")      // Immediate WAL write
-
-    err = users.DeleteFSync("bob")  // Maximum durability with fsync
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Atomic updates
-    // There are also UpdateAsync and UpdateFSync
-    users.Update("sam", func(current User, exists bool) (User, bool) {
+    
+    // Atomically update a user's age
+    users.Update("john", func(current User, exists bool) (User, bool) {
         if !exists {
-            // Create new user if doesn't exist
-            return User{Name: "Sam Wilson", Age: 25}, false
+            return User{}, false // Don't do anything if user doesn't exist
         }
-        // Modify existing user
         current.Age++
-        return current, false // Return updated value, don't delete
+        return current, false // Return updated user, don't delete
     })
-
-    count := users.Size()
-    fmt.Printf("User count: %d\n", count)
+    
+    // Count users
+    fmt.Printf("Total users: %d\n", users.Size())
 
     // Iterate through all users
     users.Range(func(key string, value User) bool {
         fmt.Printf("Key: %s, User: %+v\n", key, value)
         return true // continue iteration
     })
+    
+    // Delete a user
+    users.Delete("alice")
 }
 ```
 
-### Multiple Maps in One Store
+### Using Multiple Maps in One Store
 
 ```go
-// Single store can contain multiple typed maps
-store, err := persist.Open("app.db")
-if err != nil {
-    log.Fatal(err)
+package main
+
+import (
+    "log"
+    "github.com/Jipok/go-persist"
+)
+
+type User struct {
+    Name  string
+    Age   int
 }
-defer store.Close()
 
-// Create typed maps for different entity types
-users, err := persist.Map[User](store, "users")
-products, err := persist.Map[Product](store, "products")
-sessions, err := persist.Map[Session](store, "sessions")
+type Product struct {
+    Name  string
+    Price float64
+}
 
-// Use independently
-users.Set("u1", User{Name: "Admin"})
-products.Set("p1", Product{Name: "Widget", Price: 19.99})
+type Session struct {
+    UserID     string
+    Expiration int64
+}
+
+func main() {
+    // Create or open store
+    store, err := persist.Open("app.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer store.Close()
+
+    // Compact the store to reclaim space
+    if err := store.Shrink(); err != nil {
+        log.Fatal(err)
+    }
+
+    // Create typed maps for different entity types
+    users, err := persist.Map[User](store, "users")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    products, err := persist.Map[Product](store, "products")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    sessions, err := persist.Map[Session](store, "sessions")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Use each map independently
+    users.Set("u1", User{Name: "Admin", Age: 35})
+    products.Set("p1", Product{Name: "Widget", Price: 19.99})
+    sessions.SetAsync("sess123", Session{UserID: "u1", Expiration: 1718557123})
+}
+```
+
+## Detailed API Usage
+
+### PersistMap Methods
+
+```go
+// Retrieve data
+value, exists := myMap.Get("key")
+
+// Store data with different durability options
+myMap.SetAsync("key", value)         // High performance, background persistence
+myMap.Set("key", value)              // Balanced performance and durability
+err := myMap.SetFSync("key", value)  // Maximum durability with fsync
+
+// Delete data
+myMap.DeleteAsync("key")             // Background delete
+myMap.Delete("key")                  // Immediate WAL write
+err := myMap.DeleteFSync("key")      // With fsync for maximum durability
+
+// Atomic updates with different durability levels
+newVal, existed := myMap.UpdateAsync("key", updateFn)
+newVal, existed := myMap.Update("key", updateFn)
+newVal, existed, err := myMap.UpdateFSync("key", updateFn)
+
+// Get number of items
+count := myMap.Size()
+
+// Iterate through all items
+myMap.Range(func(key string, value ValueType) bool {
+    // Process each item
+    return true // return true to continue, false to stop
+})
+
+// Clean up resources
+myMap.Close()
 ```
 
 ### Using the Basic Store API
+
+For simple configuration or single-value storage:
 
 ```go
 type Config struct {
@@ -204,11 +232,6 @@ func main() {
         log.Fatal(err)
     }
     defer store.Close()
-
-    // Compact the store periodically to reclaim space
-    if err := store.Shrink(); err != nil {
-        log.Fatal(err)
-    }
 
     // Store configuration directly
     err = store.Write("system_config", Config{
@@ -236,6 +259,25 @@ func main() {
     }
 }
 ```
+
+## Human-readable and writable `store.db` format
+
+```bash
+go-persist 1                                          # Version header
+S key1                                                # Set operation for key1
+{"Name":"Alice","Age":30,"Email":"alice@example.com"} # Value
+S key2                                                # Set operation for key2
+"some plain string"                                   # Value
+D key1                                                # Delete operation for key1
+                                                      # Empty string for delete op
+S key2                                                # New version of key2
+"some another plain string"                           # Updated value
+
+```
+
+- `S key` - Set operation
+- `D key` - Delete operation
+- **Values**: Stored as standard JSON on the line after the operation
 
 ## Durability Levels
 

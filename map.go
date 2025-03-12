@@ -21,11 +21,39 @@ type PersistMap[T any] struct {
 
 var ErrMapAlreadyExists = errors.New("persist map with the given name already exists in store")
 
+// OpenSingleMap is the simplest way to get started with a persistent map when you need just one map per file.
+// It opens the store, compacts the WAL, and initializes the map in a single operation.
+//
+// It returns a PersistMap that represents a thread-safe persistent key-value store with type-safe values of type T.
+// This map maintains an in-memory representation for fast access while ensuring durability through the WAL.
+func OpenSingleMap[T any](path string) (*PersistMap[T], error) {
+	// Open the WAL store
+	store, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Optimize storage by compacting the WAL file
+	if err := store.Shrink(); err != nil {
+		store.Close()
+		return nil, err
+	}
+
+	// Create a map with an empty namespace
+	pm, err := Map[T](store, "")
+	if err != nil {
+		store.Close()
+		return nil, err
+	}
+
+	return pm, nil
+}
+
 // Map creates or loads PersistMap from store.
 //
 // PersistMap represents a thread-safe persistent key-value store with type-safe values.
 // It maintains an in-memory map for fast access while ensuring durability through the WAL.
-// All values are validated during loading by ensuring they can be unmarshalled into type T.
+//
 // The mapName parameter is used as a namespace: keys will be stored as "mapName:key" in the WAL.
 func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
 	if err := ValidateKey(mapName); err != nil {
