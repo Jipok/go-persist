@@ -19,6 +19,8 @@ type PersistMap[T any] struct {
 	dirty  *xsync.Map // set of dirty keys; value is struct{} as a dummy
 }
 
+var ErrMapAlreadyExists = errors.New("persist map with the given name already exists in store")
+
 // Map creates or loads PersistMap from store.
 //
 // PersistMap represents a thread-safe persistent key-value store with type-safe values.
@@ -26,6 +28,11 @@ type PersistMap[T any] struct {
 // All values are validated during loading by ensuring they can be unmarshalled into type T.
 // The mapName parameter is used as a namespace: keys will be stored as "mapName:key" in the WAL.
 func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
+	_, found := store.persistMaps.Load(mapName)
+	if found {
+		return nil, ErrMapAlreadyExists
+	}
+
 	pm := &PersistMap[T]{
 		store:  store,
 		data:   xsync.NewMap(), // Using xsync.Map instead of built-in map

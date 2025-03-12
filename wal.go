@@ -311,6 +311,10 @@ func (s *Store) Read(key string, target interface{}) error {
 // disk space and improve read performance.
 func (s *Store) Shrink() error {
 	// TODO Need less lock time
+
+	// IMPORTANT REMINDER: When extending this code, always ensure that locks are acquired in a consistent order.
+	// For example, any locks on xsync.Map in map Set/Update/Delete should be obtained before acquiring s.mu,
+	// and avoid reversing this order. Violating this can lead to DEADLOCKS
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
