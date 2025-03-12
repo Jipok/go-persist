@@ -28,6 +28,10 @@ var ErrMapAlreadyExists = errors.New("persist map with the given name already ex
 // All values are validated during loading by ensuring they can be unmarshalled into type T.
 // The mapName parameter is used as a namespace: keys will be stored as "mapName:key" in the WAL.
 func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
+	if err := ValidateKey(mapName); err != nil {
+		return nil, err
+	}
+
 	_, found := store.persistMaps.Load(mapName)
 	if found {
 		return nil, ErrMapAlreadyExists

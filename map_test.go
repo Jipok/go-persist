@@ -237,8 +237,8 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 		t.Fatalf("Failed to open store: %v", err)
 	}
 
-	// Create first PersistMap[string] with namespace "first".
-	map1, err := Map[string](store, "first")
+	// Create first PersistMap[string] with empty namespace
+	map1, err := Map[string](store, "")
 	if err != nil {
 		t.Fatalf("Failed to create persist map 'first': %v", err)
 	}
@@ -250,7 +250,7 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 	}
 
 	// Perform operations on map1.
-	map1.Set("key1", "hello") // Updated: no error returned
+	map1.Set("", "hello")     // Updated: no error returned
 	map1.Set("key2", "world") // Updated: no error returned
 	// Delete key2 from map1.
 	map1.Delete("key2") // Updated: no error returned
@@ -274,8 +274,8 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 		t.Fatalf("Failed to reopen store: %v", err)
 	}
 
-	// Reload the maps from the store.
-	reloadedMap1, err := Map[string](store2, "first")
+	// Reload the maps from the store
+	reloadedMap1, err := Map[string](store2, "")
 	if err != nil {
 		t.Fatalf("Failed to reload persist map 'first': %v", err)
 	}
@@ -284,10 +284,10 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 		t.Fatalf("Failed to reload persist map 'second': %v", err)
 	}
 
-	// Validate map1.
-	val, ok := reloadedMap1.Get("key1")
+	// Validate map1
+	val, ok := reloadedMap1.Get("")
 	if !ok {
-		t.Fatalf("Failed to get 'key1' from map1")
+		t.Fatalf("Failed to get empty key from map1")
 	}
 	if val != "hello" {
 		t.Errorf("Expected 'hello' for key 'key1' in map1, got %q", val)

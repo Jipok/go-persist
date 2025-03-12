@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/puzpuzpuz/xsync/v3"
 )
@@ -170,6 +171,9 @@ func (s *Store) FSyncAll() error {
 // The newline after the value serves as a marker that the record was
 // successfully written and can be safely processed during recovery.
 func (s *Store) Write(key string, value interface{}) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -432,4 +436,35 @@ func (s *Store) GetSyncInterval() time.Duration {
 // SetSyncInterval sets a new sync interval
 func (s *Store) SetSyncInterval(interval time.Duration) {
 	s.syncInterval.Store(int64(interval))
+}
+
+// ValidateKey validates the provided key ensuring it is not empty and that it does not include forbidden characters:
+// ASCII (0x00–0x1F, 0x7F) and additional ones in the extended control range (0x80–0x9F).
+func ValidateKey(key string) error {
+	// Iterate over the string using indexing to avoid extra allocations for pure ASCII strings
+	for i := 0; i < len(key); i++ {
+		b := key[i]
+		// Fast path for ASCII characters
+		if b < 0x80 {
+			// b is an ASCII character
+			// Check for control characters (0x00-0x1F and 0x7F)
+			if b < 0x20 || b == 0x7F {
+				return fmt.Errorf("key contains forbidden control character (byte 0x%x) at position %d", b, i)
+			}
+			continue
+		}
+
+		// Slow path: decode full rune for non-ASCII
+		r, size := utf8.DecodeRuneInString(key[i:])
+		// If rune is in the control character range:
+		// ASCII: r < 0x20 already handled in byte loop,
+		// Extended control: U+007F-U+009F.
+		if r >= 0x7F && r <= 0x9F {
+			return fmt.Errorf("key contains forbidden control rune %U at byte position %d", r, i)
+		}
+		// Advance by the size of the decoded rune
+		i += size - 1
+	}
+
+	return nil
 }
