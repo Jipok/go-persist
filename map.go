@@ -223,8 +223,10 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 // but with highest performance cost.
 func (pm *PersistMap[T]) SetFSync(key string, value T) error {
 	pm.Set(key, value)
-	// Flush all pending writes to disk (fsync)
-	return pm.store.FSyncAll()
+	// Flush (fsync) to ensure durability
+	pm.store.mu.Lock()
+	defer pm.store.mu.Unlock()
+	return pm.store.f.Sync()
 }
 
 // DeleteAsync removes the key from the in-memory map and marks it as dirty for background flush
@@ -252,8 +254,10 @@ func (pm *PersistMap[T]) Delete(key string) {
 // and updates the in-memory map.
 func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	pm.Delete(key)
-	// Flush all pending writes to disk (fsync)
-	return pm.store.FSyncAll()
+	// Flush (fsync) to ensure durability
+	pm.store.mu.Lock()
+	defer pm.store.mu.Unlock()
+	return pm.store.f.Sync()
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -423,7 +427,9 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *UpdateAction[T])) 
 func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool, err error) {
 	newValue, existed = pm.Update(key, updater)
 	// Flush (fsync) to ensure durability
-	err = pm.store.FSyncAll()
+	pm.store.mu.Lock()
+	defer pm.store.mu.Unlock()
+	err = pm.store.f.Sync()
 	return
 }
 
