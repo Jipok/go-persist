@@ -26,7 +26,7 @@ With the introduction of Generics in recent Go versions and the availability of 
 | go-persist `Async` | 7,117,079      | 140   | 6.07 MB   |
 | sync.Map           | 5,509,706      | 181   | N/A       |
 | map+RWMutex        | 2,532,314      | 394   | N/A       |
-| go-persist `Set`   | 1,463,708      | 683   | 6.07 MB   |
+| go-persist `Sync`  | 1,463,708      | 683   | 6.07 MB   |
 | buntdb             | 251,218        | 3980  | 11.15 MB  |
 | bolt       `NoSync`| 181,481        | 5510  | 24.00 MB  |
 
@@ -71,23 +71,6 @@ func main() {
         Age: 28,
     })
 
-    // High-performance store (background persistence)
-    users.SetAsync("john", User{
-        Name: "John Doe",
-        Email: "john@example.com",
-        Age: 30,
-    })
-
-    // Maximum durability store (with fsync)
-    err = users.SetFSync("bob", User{
-        Name: "Bob Johnson",
-        Email: "bob@example.com",
-        Age: 35,
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
-
     // Retrieve a user
     john, ok := users.Get("john")
     if !ok {
@@ -96,7 +79,7 @@ func main() {
     fmt.Printf("User: %+v\n", john)
 
     // Atomically update a user's age
-    users.Update("john", func(upd *UpdateAction[User]) {
+    users.Update("john", func(upd *persist.Update[User]) {
         if !upd.Exists {
             upd.Cancel() // Don't do anything if user doesn't exist
             return
@@ -199,7 +182,7 @@ myMap.Delete("key")                  // Immediate WAL write
 err := myMap.DeleteFSync("key")      // With fsync for maximum durability
 
 // Atomic updates with different durability levels
-newVal, existed := myMap.UpdateAsync("key", func(upd *UpdateAction[T]) {
+newVal, existed := myMap.UpdateAsync("key", func(upd *persist.Update[T]) {
     // Modify upd.Value directly (default action is "set")
     // Or explicitly call:
     // upd.Set(newValue)    // to update the value
@@ -207,11 +190,11 @@ newVal, existed := myMap.UpdateAsync("key", func(upd *UpdateAction[T]) {
     // upd.Cancel()         // to keep original value unchanged
 })
 
-newVal, existed := myMap.Update("key", func(upd *UpdateAction[T]) {
+newVal, existed := myMap.Update("key", func(upd *persist.Update[T]) {
     // Same options as above
 })
 
-newVal, existed, err := myMap.UpdateFSync("key", func(upd *UpdateAction[T]) {
+newVal, existed, err := myMap.UpdateFSync("key", func(upd *persist.Update[T]) {
     // Same options as above
 })
 

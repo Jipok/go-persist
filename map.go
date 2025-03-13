@@ -262,12 +262,12 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 
 /////////////////////////////////////////////////////////////////////////////////////////
 
-// UpdateAction encapsulates the state for updating a key in the map.
+// Update encapsulates the state for updating a key in the map.
 // It holds the current value and its existence flag, and allows the updater
 // to specify the intended action: update (set), deletion, or cancellation.
 // By default, the action is set to update, so modifying the Value field directly
 // implies a "set" operation.
-type UpdateAction[T any] struct {
+type Update[T any] struct {
 	Value  T          // Current value retrieved from the map
 	Exists bool       // Whether the key exists
 	action actionType // The chosen action
@@ -285,18 +285,18 @@ const (
 // Set updates the internal value and marks the action as "set".
 // Note that simply modifying the Value field directly also works
 // since "set" is the default action.
-func (ua *UpdateAction[T]) Set(newVal T) {
+func (ua *Update[T]) Set(newVal T) {
 	ua.Value = newVal
 	ua.action = actionSet
 }
 
 // Delete indicates that the key should be deleted
-func (ua *UpdateAction[T]) Delete() {
+func (ua *Update[T]) Delete() {
 	ua.action = actionDelete
 }
 
 // Cancel indicates that no changes should be applied
-func (ua *UpdateAction[T]) Cancel() {
+func (ua *Update[T]) Cancel() {
 	ua.action = actionCancel
 }
 
@@ -317,13 +317,13 @@ func (ua *UpdateAction[T]) Cancel() {
 //
 // This method locks the relevant hash table bucket during execution, so avoid long-running
 // operations in the updater function to prevent blocking other bucket operations.
-func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool) {
+func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *Update[T])) (newValue T, existed bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
 			current = oldValue.(T)
 		}
-		upd := &UpdateAction[T]{
+		upd := &Update[T]{
 			Value:  current,
 			Exists: loaded,
 			action: actionSet,
@@ -367,13 +367,13 @@ func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *UpdateAction[
 //
 // This method locks the relevant hash table bucket during execution, so avoid long-running
 // operations in the updater function to prevent blocking other bucket operations.
-func (pm *PersistMap[T]) Update(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool) {
+func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newValue T, existed bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
 			current = oldValue.(T)
 		}
-		upd := &UpdateAction[T]{
+		upd := &Update[T]{
 			Value:  current,
 			Exists: loaded,
 			action: actionSet,
@@ -424,7 +424,7 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *UpdateAction[T])) 
 //
 // This method locks the relevant hash table bucket during execution, so avoid long-running
 // operations in the updater function to prevent blocking other bucket operations.
-func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool, err error) {
+func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *Update[T])) (newValue T, existed bool, err error) {
 	newValue, existed = pm.Update(key, updater)
 	// Flush (fsync) to ensure durability
 	pm.store.mu.Lock()
