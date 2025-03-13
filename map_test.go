@@ -250,16 +250,17 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 	}
 
 	// Perform operations on map1.
-	map1.Set("", "hello")     // Updated: no error returned
-	map1.Set("key2", "world") // Updated: no error returned
+	map1.Set("", "hello")
+	map1.Set("key2", "world")
 	// Delete key2 from map1.
-	map1.Delete("key2") // Updated: no error returned
+	map1.Delete("key2")
 
 	// Perform operations on map2.
-	map2.Set("one", 1) // Updated: no error returned
-	map2.Set("two", 2) // Updated: no error returned
+	map2.Set("one", 1)
+	map2.Set("two", 2)
 	// Delete key 'two' from map2.
-	map2.Delete("two") // Updated: no error returned
+	map2.Delete("two")
+	map2.Delete("Unknown")
 
 	// Close the store to flush all operations.
 	if err := store.Close(); err != nil {
@@ -361,29 +362,32 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 
 				if useSync {
 					// Using Update method.
-					pm.Update(key, func(current int, exists bool) (int, bool) {
+					pm.Update(key, func(upd *UpdateAction[int]) {
 						if deletion {
-							// Signal deletion.
-							return 0, true
+							upd.Delete()
+							return
 						}
 						// If exists add a random delta (1..10); if not, initialize with a random value.
 						delta := rand.Intn(10) + 1
-						if exists {
-							return current + delta, false
+						if upd.Exists {
+							upd.Value += delta
+							return
 						}
-						return delta, false
+						upd.Value = delta
 					})
 				} else {
 					// Using UpdateAsync method.
-					pm.UpdateAsync(key, func(current int, exists bool) (int, bool) {
+					pm.UpdateAsync(key, func(upd *UpdateAction[int]) {
 						if deletion {
-							return 0, true
+							upd.Delete()
+							return
 						}
 						delta := rand.Intn(10) + 1
-						if exists {
-							return current + delta, false
+						if upd.Exists {
+							upd.Value += delta
+							return
 						}
-						return delta, false
+						upd.Value = delta
 					})
 				}
 				// Small sleep to increase concurrency variability.
@@ -398,13 +402,13 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 	for i, key := range keys {
 		if i%2 == 0 {
 			// Update key to have a known constant value (e.g. i * 100).
-			pm.Update(key, func(current int, exists bool) (int, bool) {
-				return i * 100, false
+			pm.Update(key, func(upd *UpdateAction[int]) {
+				upd.Value = i * 100
 			})
 		} else {
 			// Force deletion of the key.
-			pm.Update(key, func(current int, exists bool) (int, bool) {
-				return 0, true
+			pm.Update(key, func(upd *UpdateAction[int]) {
+				upd.Delete()
 			})
 		}
 	}

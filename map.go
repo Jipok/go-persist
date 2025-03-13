@@ -256,32 +256,91 @@ func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	return pm.store.FSyncAll()
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////
+
+// UpdateAction encapsulates the state for updating a key in the map.
+// It holds the current value and its existence flag, and allows the updater
+// to specify the intended action: update (set), deletion, or cancellation.
+// By default, the action is set to update, so modifying the Value field directly
+// implies a "set" operation.
+type UpdateAction[T any] struct {
+	Value  T          // Current value retrieved from the map
+	Exists bool       // Whether the key exists
+	action actionType // The chosen action
+}
+
+type actionType int
+
+const (
+	actionNone   actionType = iota // No action was taken
+	actionSet                      // Update the value (default operation)
+	actionDelete                   // Delete the key
+	actionCancel                   // Cancel the update
+)
+
+// Set updates the internal value and marks the action as "set".
+// Note that simply modifying the Value field directly also works
+// since "set" is the default action.
+func (ua *UpdateAction[T]) Set(newVal T) {
+	ua.Value = newVal
+	ua.action = actionSet
+}
+
+// Delete indicates that the key should be deleted
+func (ua *UpdateAction[T]) Delete() {
+	ua.action = actionDelete
+}
+
+// Cancel indicates that no changes should be applied
+func (ua *UpdateAction[T]) Cancel() {
+	ua.action = actionCancel
+}
+
 // UpdateAsync atomically updates a key using the updater function.
 //
 // It only updates the in-memory value and marks the key as dirty so that background FSyncAll
 // will eventually persist the change.
 //
-// The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
-// and should return the new value and a flag indicating whether to delete the key.
+// The updater receives an UpdateAction containing the current value and existence state. It can:
 //
-// This call locks a hash table bucket while the updater function
-// is executed. It means that modifications on other entries in
-// the bucket will be blocked until the updater executes. Consider
-// this when the function includes long-running operations.
-func (pm *PersistMap[T]) UpdateAsync(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool) {
-	// Atomically update the in-memory map
+// - Simply modify upd.Value to update the value (default action is "set")
+//
+// - Call upd.Set() to explicitly set a new value
+//
+// - Call upd.Delete() to remove the key
+//
+// - Call upd.Cancel() to keep the original value unchanged
+//
+// This method locks the relevant hash table bucket during execution, so avoid long-running
+// operations in the updater function to prevent blocking other bucket operations.
+func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
 			current = oldValue.(T)
 		}
-		// updater returns (newValue, delete)
-		return updater(current, loaded)
+		upd := &UpdateAction[T]{
+			Value:  current,
+			Exists: loaded,
+			action: actionSet,
+		}
+		updater(upd)
+
+		switch upd.action {
+		case actionDelete:
+			// Mark key for deletion (Compute returns delete flag)
+			return nil, true
+		case actionSet:
+			// Set new value
+			return upd.Value, false
+		default:
+			// If cancelled, return the original value and state
+			return oldValue, loaded
+		}
 	})
-	// Always mark the key as dirty for eventual WAL persistence
+	// Mark the key as dirty for asynchronous persistence
 	pm.dirty.Store(key, struct{}{})
 
-	// If Compute indicates deletion, return zero value and false
 	if !ok {
 		var zero T
 		return zero, false
@@ -292,35 +351,50 @@ func (pm *PersistMap[T]) UpdateAsync(key string, updater func(current T, exists 
 // Update atomically updates the value for the given key using the updater function,
 // and immediately writes the change to the WAL (without forcing disk fsync).
 //
-// The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
-// and should return the new value and a flag indicating whether to delete the key.
+// The updater receives an UpdateAction containing the current value and existence state. It can:
 //
-// This call locks a hash table bucket while the updater function
-// is executed. It means that modifications on other entries in
-// the bucket will be blocked until the updater executes. Consider
-// this when the function includes long-running operations.
-func (pm *PersistMap[T]) Update(key string, updater func(current T, exists bool) (newValue T, doDelete bool)) (newValue T, existed bool) {
+// - Simply modify upd.Value to update the value (default action is "set")
+//
+// - Call upd.Set() to explicitly set a new value
+//
+// - Call upd.Delete() to remove the key
+//
+// - Call upd.Cancel() to keep the original value unchanged
+//
+// This method locks the relevant hash table bucket during execution, so avoid long-running
+// operations in the updater function to prevent blocking other bucket operations.
+func (pm *PersistMap[T]) Update(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
 			current = oldValue.(T)
 		}
-		result, doDelete := updater(current, loaded)
+		upd := &UpdateAction[T]{
+			Value:  current,
+			Exists: loaded,
+			action: actionSet,
+		}
+		updater(upd)
 		namespacedKey := pm.prefix + key
-		if doDelete {
+
+		switch upd.action {
+		case actionDelete:
 			// Write D record atomically inside Compute callback
 			if err := pm.store.Delete(namespacedKey); err != nil {
 				pm.store.ErrorHandler(err)
 			}
 			// Returning true signals removal of the key from the map
 			return nil, true
-		} else {
+		case actionSet:
 			// Write S record atomically inside Compute callback
-			if err := pm.store.Write(namespacedKey, result); err != nil {
+			if err := pm.store.Write(namespacedKey, upd.Value); err != nil {
 				pm.store.ErrorHandler(err)
 			}
 			// Returning false signals that the key should be kept in the map
-			return result, false
+			return upd.Value, false
+		default:
+			// If cancelled, return the original value and state
+			return oldValue, loaded
 		}
 	})
 	if !ok {
@@ -334,19 +408,26 @@ func (pm *PersistMap[T]) Update(key string, updater func(current T, exists bool)
 //
 // Offers maximum durability against both application and system crashes, but with the highest performance cost.
 //
-// The updater function receives current value (or zero value if not exists) and a flag indicating its existence,
-// and should return the new value and a flag indicating whether to delete the key.
+// The updater receives an UpdateAction containing the current value and existence state. It can:
 //
-// This call locks a hash table bucket while the updater function
-// is executed. It means that modifications on other entries in
-// the bucket will be blocked until the updater executes. Consider
-// this when the function includes long-running operations.
-func (pm *PersistMap[T]) UpdateFSync(key string, updater func(current T, exists bool) (newValue T, delete bool)) (newValue T, existed bool, err error) {
+// - Simply modify upd.Value to update the value (default action is "set")
+//
+// - Call upd.Set() to explicitly set a new value
+//
+// - Call upd.Delete() to remove the key
+//
+// - Call upd.Cancel() to keep the original value unchanged
+//
+// This method locks the relevant hash table bucket during execution, so avoid long-running
+// operations in the updater function to prevent blocking other bucket operations.
+func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *UpdateAction[T])) (newValue T, existed bool, err error) {
 	newValue, existed = pm.Update(key, updater)
 	// Flush (fsync) to ensure durability
 	err = pm.store.FSyncAll()
 	return
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////
 
 // Size returns current size of the map
 func (pm *PersistMap[T]) Size() int {
@@ -381,7 +462,7 @@ func (pm *PersistMap[T]) Close() {
 		return
 	}
 
-	mapName, _ := strings.CutPrefix(pm.prefix, ":")
+	mapName := strings.TrimSuffix(pm.prefix, ":")
 	pm.store.persistMaps.Delete(mapName)
 
 	pm.Sync()

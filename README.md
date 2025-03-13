@@ -20,7 +20,7 @@ With the introduction of Generics in recent Go versions and the availability of 
 
 ## Performance
 
-*Benchmark: 1M struct operations over 150 threads, after 100k prefill*
+*Benchmark: 1M struct operations over 150 goroutines, after 100k prefill*
 | Solution           | Operations/sec | ns/op | File Size |
 |--------------------|----------------|-------|-----------|
 | go-persist `Async` | 7,117,079      | 140   | 6.07 MB   |

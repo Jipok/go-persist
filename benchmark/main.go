@@ -128,16 +128,19 @@ func benchmarkPersistStructsSync() {
 		})
 	}
 
-	// --- Benchmark phase: synchronous Set ---
-	fmt.Print("go-persist Set    ")
+	// --- Benchmark phase: synchronous ---
+	fmt.Print("go-persist Sync   ")
 	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
-			// Write operation using synchronous Set method
-			persistStructMap.Set(key, TestStruct{
-				Field1: i,
-				Field2: "updated struct",
+			persistStructMap.Update(key, func(upd *persist.UpdateAction[TestStruct]) {
+				upd.Value.Field1 = i
+				upd.Value.Field2 = "updated struct"
 			})
+			// persistStructMap.Set(key, TestStruct{
+			// 	Field1: i,
+			// 	Field2: "updated struct",
+			// })
 		} else {
 			// Read operation
 			val, ok := persistStructMap.Get(key)
@@ -169,12 +172,19 @@ func benchmarkPersistStructsAsync() {
 		})
 	}
 
-	// --- Benchmark phase: asynchronous SetAsync ---
+	// TODO m.b. need Sync() here?
+
+	// --- Benchmark phase: asynchronous ---
 	fmt.Print("go-persist Async  ")
 	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
-			// Write operation using SetAsync
+			// persistStructMap.UpdateAsync(key, func(upd *persist.UpdateAction[TestStruct]) {
+			// 	upd.Set(TestStruct{
+			// 		Field1: i,
+			// 		Field2: "updated struct",
+			// 	})
+			// })
 			persistStructMap.SetAsync(key, TestStruct{
 				Field1: i,
 				Field2: "updated struct",
