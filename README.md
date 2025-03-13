@@ -96,7 +96,7 @@ func main() {
     fmt.Printf("User: %+v\n", john)
 
     // Atomically update a user's age
-    users.Update("john", func(upd *UpdateAction[User]) {
+    users.Update("john", func(upd *persist.Update[User]) {
         if !upd.Exists {
             upd.Cancel() // Don't do anything if user doesn't exist
             return
@@ -199,7 +199,7 @@ myMap.Delete("key")                  // Immediate WAL write
 err := myMap.DeleteFSync("key")      // With fsync for maximum durability
 
 // Atomic updates with different durability levels
-newVal, existed := myMap.UpdateAsync("key", func(upd *UpdateAction[T]) {
+newVal, existed := myMap.UpdateAsync("key", func(upd *persist.Update[T]) {
     // Modify upd.Value directly (default action is "set")
     // Or explicitly call:
     // upd.Set(newValue)    // to update the value
@@ -207,11 +207,11 @@ newVal, existed := myMap.UpdateAsync("key", func(upd *UpdateAction[T]) {
     // upd.Cancel()         // to keep original value unchanged
 })
 
-newVal, existed := myMap.Update("key", func(upd *UpdateAction[T]) {
+newVal, existed := myMap.Update("key", func(upd *persist.Update[T]) {
     // Same options as above
 })
 
-newVal, existed, err := myMap.UpdateFSync("key", func(upd *UpdateAction[T]) {
+newVal, existed, err := myMap.UpdateFSync("key", func(upd *persist.Update[T]) {
     // Same options as above
 })
 

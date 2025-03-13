@@ -362,7 +362,7 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 
 				if useSync {
 					// Using Update method.
-					pm.Update(key, func(upd *UpdateAction[int]) {
+					pm.Update(key, func(upd *Update[int]) {
 						if deletion {
 							upd.Delete()
 							return
@@ -377,7 +377,7 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 					})
 				} else {
 					// Using UpdateAsync method.
-					pm.UpdateAsync(key, func(upd *UpdateAction[int]) {
+					pm.UpdateAsync(key, func(upd *Update[int]) {
 						if deletion {
 							upd.Delete()
 							return
@@ -402,12 +402,12 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 	for i, key := range keys {
 		if i%2 == 0 {
 			// Update key to have a known constant value (e.g. i * 100).
-			pm.Update(key, func(upd *UpdateAction[int]) {
+			pm.Update(key, func(upd *Update[int]) {
 				upd.Value = i * 100
 			})
 		} else {
 			// Force deletion of the key.
-			pm.Update(key, func(upd *UpdateAction[int]) {
+			pm.Update(key, func(upd *Update[int]) {
 				upd.Delete()
 			})
 		}
