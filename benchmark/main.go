@@ -133,7 +133,7 @@ func benchmarkPersistStructsSync() {
 	Ops(benchOps, goroutines, func(i, thread int) {
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
-			persistStructMap.Update(key, func(upd *persist.UpdateAction[TestStruct]) {
+			persistStructMap.Update(key, func(upd *persist.Update[TestStruct]) {
 				upd.Value.Field1 = i
 				upd.Value.Field2 = "updated struct"
 			})

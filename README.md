@@ -293,6 +293,7 @@ go-persist offers multiple durability options to balance performance and data sa
    - Updates are written to WAL and flushed to physical disk with fsync
    - Safe against both application and system crashes
    - Use when data integrity is critical
+   - See [Design Trade-offs](https://github.com/Jipok/go-persist#design-trade-offs)
 
 ### Configuring Sync Interval
 
@@ -324,16 +325,40 @@ For the `Set` method, even with a very long sync interval, changes are initially
 * The parameter `/proc/sys/vm/dirty_writeback_centisecs` is typically set to 500 (≈5 seconds), meaning the kernel scans for dirty pages and may flush them every ~5 seconds.
 * The parameter `/proc/sys/vm/dirty_expire_centisecs` is usually around 3000 (≈30 seconds), so pages older than ~30 seconds are forced to be written to disk.
 
-## When to Use
+## Design Considerations and Trade-offs
 
-- Applications requiring persistence with minimal overhead
-- Working with typed data structures
-- When data inspection and debugging are important
-- For heavy workloads (consider background flush interval)
-- When atomic update operations are needed
+go-persist is designed with specific goals in mind: simplicity, type safety, and performance for embedded use cases. Understanding the following considerations will help you determine if it's the right fit for your needs:
 
-## Limitations
+### Intended Use Cases
+- **Configuration storage**: Store application settings with typed access
+- **Local caches with persistence**: Keep type-safe data across application restarts
+- **Lightweight structured data storage**: For applications where a full database is overkill
+- **High-throughput workloads**: With Async mode, can handle extremely high write volumes when immediate durability isn't critical
+- **Development and prototyping**: Quick setup with minimal configuration
+- **Small to medium data volumes**: Ideally under a few GB of data
 
-- Not designed for datasets larger than available memory
-- No support for complex queries or secondary indexes
-- WAL file grows until `Shrink()` is called
+### Design Trade-offs
+
+**Human-Readable Format vs Checksums**
+- The WAL format prioritizes human readability and debuggability
+- No built-in checksums or CRCs to validate file integrity
+- If you need stronger corruption detection, consider using this on a filesystem with checksumming (like ZFS, btrfs) or RAID
+- Can detect incomplete format entries from crashes but can't detect bitrot or partial corruption within a syntactically valid entry
+
+**Memory-First Approach**
+- All data is kept in memory for maximum performance
+- Not suitable for datasets larger than available RAM
+- Provides map-like access patterns rather than database query capabilities
+
+**Simplicity Over Advanced Features**
+- Minimal codebase (<1000 lines) for easier review and understanding
+- No complex recovery mechanisms, distributed capabilities, or transaction isolation
+- `Shrink()` operation is blocking by design to keep implementation simple
+
+### Performance and Scale Considerations
+- Tested with datasets up to ~400MB of actual data
+- WAL file grows unbounded until `Shrink()` is called
+- `Shrink()` can cause brief (up to second) pauses; best called during low-activity periods
+- Memory usage scales linearly with dataset size, with reasonable overhead compared to raw data
+
+For applications requiring complex queries, distributed access, full ACID compliance, strong data integrity guarantees, protection against hardware failures, or datasets larger than available memory, a traditional database system would be more appropriate.
