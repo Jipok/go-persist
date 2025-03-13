@@ -94,16 +94,17 @@ func main() {
         log.Fatal("User not found")
     }
     fmt.Printf("User: %+v\n", john)
-    
+
     // Atomically update a user's age
-    users.Update("john", func(current User, exists bool) (User, bool) {
-        if !exists {
-            return User{}, false // Don't do anything if user doesn't exist
+    users.Update("john", func(upd *UpdateAction[User]) {
+        if !upd.Exists {
+            upd.Cancel() // Don't do anything if user doesn't exist
+            return
         }
-        current.Age++
-        return current, false // Return updated user, don't delete
+        // Modify the value directly
+        upd.Value.Age++
     })
-    
+
     // Count users
     fmt.Printf("Total users: %d\n", users.Size())
 
@@ -112,7 +113,7 @@ func main() {
         fmt.Printf("Key: %s, User: %+v\n", key, value)
         return true // continue iteration
     })
-    
+
     // Delete a user
     users.Delete("alice")
 }
@@ -161,12 +162,12 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    
+
     products, err := persist.Map[Product](store, "products")
     if err != nil {
         log.Fatal(err)
     }
-    
+
     sessions, err := persist.Map[Session](store, "sessions")
     if err != nil {
         log.Fatal(err)
@@ -198,9 +199,21 @@ myMap.Delete("key")                  // Immediate WAL write
 err := myMap.DeleteFSync("key")      // With fsync for maximum durability
 
 // Atomic updates with different durability levels
-newVal, existed := myMap.UpdateAsync("key", updateFn)
-newVal, existed := myMap.Update("key", updateFn)
-newVal, existed, err := myMap.UpdateFSync("key", updateFn)
+newVal, existed := myMap.UpdateAsync("key", func(upd *UpdateAction[T]) {
+    // Modify upd.Value directly (default action is "set")
+    // Or explicitly call:
+    // upd.Set(newValue)    // to update the value
+    // upd.Delete()         // to delete the key
+    // upd.Cancel()         // to keep original value unchanged
+})
+
+newVal, existed := myMap.Update("key", func(upd *UpdateAction[T]) {
+    // Same options as above
+})
+
+newVal, existed, err := myMap.UpdateFSync("key", func(upd *UpdateAction[T]) {
+    // Same options as above
+})
 
 // Get number of items
 count := myMap.Size()
