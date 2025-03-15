@@ -4,12 +4,12 @@ go 1.23.6
 
 require (
 	github.com/Jipok/go-persist v1.7.0
-	github.com/boltdb/bolt v1.3.1
+	github.com/goccy/go-json v0.10.5
 	github.com/tidwall/buntdb v1.3.2
+	go.etcd.io/bbolt v1.4.0
 )
 
 require (
-	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/tidwall/btree v1.4.2 // indirect
 	github.com/tidwall/gjson v1.14.3 // indirect

@@ -72,14 +72,14 @@ func main() {
     })
 
     // Retrieve a user
-    john, ok := users.Get("john")
+    john, ok := users.Get("alice")
     if !ok {
         log.Fatal("User not found")
     }
     fmt.Printf("User: %+v\n", john)
 
     // Atomically update a user's age
-    users.Update("john", func(upd *persist.Update[User]) {
+    users.Update("alice", func(upd *persist.Update[User]) {
         if !upd.Exists {
             upd.Cancel() // Don't do anything if user doesn't exist
             return
@@ -148,7 +148,7 @@ func main() {
     }
 
     // Create or load store file
-    err := persist.Open("app.db")
+    err = store.Open("app.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -232,7 +232,7 @@ func main() {
     defer store.Close()
 
     // Store configuration directly
-    err = store.Write("system_config", Config{
+    err = store.Set("system_config", Config{
         Debug:          true,
         MaxConnections: 100,
     })
@@ -240,7 +240,7 @@ func main() {
         log.Fatal(err)
     }
 
-    config, err := persist.Get[Config]("system_config")
+    config, err := persist.Get[Config](store, "system_config")
     if err != nil {
         log.Fatal(err)
     }
