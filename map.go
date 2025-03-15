@@ -127,7 +127,7 @@ func (pm *PersistMap[T]) Sync() {
 			// Lock is taken for this key. Now we can read the in-memory value
 			if v, ok := pm.data.Load(key); ok {
 				// Try persisting the current value in WAL
-				if err := pm.Store.Write(namespacedKey, v); err != nil {
+				if err := pm.Store.write(namespacedKey, v); err != nil {
 					log.Println("go-persist: Background flush set failed for key:", key, "error:", err)
 					// Return oldValue and false, so that the dirty flag is not removed
 					return oldValue, false
@@ -198,7 +198,7 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 	pm.data.Compute(key, func(oldValue interface{}, loaded bool) (newValue interface{}, delete bool) {
 		namespacedKey := pm.prefix + key
 		// Write S record to disk(page cache) immediately
-		if err := pm.Store.Write(namespacedKey, value); err != nil {
+		if err := pm.Store.write(namespacedKey, value); err != nil {
 			pm.Store.ErrorHandler(err)
 		}
 		// Update in-memory xsync.Map
@@ -380,7 +380,7 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newVa
 			return nil, true
 		case actionSet:
 			// Write S record atomically inside Compute callback
-			if err := pm.Store.Write(namespacedKey, upd.Value); err != nil {
+			if err := pm.Store.write(namespacedKey, upd.Value); err != nil {
 				pm.Store.ErrorHandler(err)
 			}
 			// Returning false signals that the key should be kept in the map

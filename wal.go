@@ -45,6 +45,27 @@ type Store struct {
 	ErrorHandler  func(err error)
 }
 
+// New creates and initializes a new Store instance.
+//
+// The returned Store is not yet connected to any file - you must call Open()
+// with a file path to load existing data or create a new persistence file.
+//
+// By default, the Store is configured with:
+//
+// - DefaultSyncInterval (1 second) for background synchronization
+//
+// - A default error handler that calls log.Fatal
+//
+// - Empty maps for tracking PersistMap instances and orphaned records
+//
+// Example usage:
+//
+//	store := persist.New()
+//	err := store.Open("mydata.db")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer store.Close()
 func New() *Store {
 	s := &Store{
 		persistMaps:   xsync.NewMap(),
@@ -261,13 +282,13 @@ func (s *Store) FSyncAll() error {
 	return s.f.Sync()
 }
 
-// Write persists a key-value pair by writing a "set" record to the log.
+// write persists a key-value pair by writing a "set" record to the log.
 // The record format consists of two lines:
 // 1. S <key>
 // 2. <json-serialized-value>
 // The newline after the value serves as a marker that the record was
 // successfully written and can be safely processed during recovery.
-func (s *Store) Write(key string, value interface{}) error {
+func (s *Store) write(key string, value interface{}) error {
 	if !s.loaded {
 		return ErrNotLoaded
 	}
@@ -308,6 +329,7 @@ func (s *Store) Delete(key string) error {
 	header := "D " + key + "\n"
 	line := "\n"
 
+	defer s.orphanRecords.Delete(key)
 	if _, err := s.f.Write([]byte(header + line)); err != nil {
 		return err
 	}
@@ -360,71 +382,50 @@ func readRecord(reader *bufio.Reader) (op string, key string, value string, err 
 	return op, key, value, nil
 }
 
-// Read retrieves the most recent value for a key by scanning the entire log file.
-// It processes all records sequentially, tracking whether the key was set or deleted.
-// The target parameter must be a pointer where the unmarshalled JSON value will be stored.
+// Get retrieves a typed value from orphaned records.
 // Returns ErrKeyNotFound if the key doesn't exist or was deleted in the most recent operation.
-func (s *Store) Read(key string, target interface{}) error {
-	// Lock for consistency (we use a separate file descriptor for reading)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func Get[T any](s *Store, key string) (T, error) {
+	var result T
 	if !s.loaded {
-		return ErrNotLoaded
+		return result, ErrNotLoaded
 	}
 
-	// Open file for reading from the beginning
-	f, err := os.Open(s.path)
+	data, exists := s.orphanRecords.Load(key)
+	if !exists {
+		return result, ErrKeyNotFound
+	}
+
+	// If the stored value is already of type T, return it directly.
+	if typed, ok := data.(T); ok {
+		return typed, nil
+	}
+
+	// If the stored value is a string, perform lazy JSON unmarshaling.
+	dataStr, ok := data.(string)
+	if !ok {
+		return result, errors.New("stored orphan record is not convertible to expected type")
+	}
+	err := json.Unmarshal([]byte(dataStr), &result)
 	if err != nil {
-		return err
+		return result, fmt.Errorf("failed to unmarshal orphan record: %w", err)
 	}
-	defer f.Close()
 
-	reader := bufio.NewReader(f)
+	// Cache the converted result for future calls.
+	s.orphanRecords.Store(key, result)
+	return result, nil
+}
 
-	// Read and validate WAL header line ensuring it's properly terminated
-	headerLine, err := reader.ReadString('\n')
+// Set persists a key-value pair by writing a "set" record to the WAL log
+// and updates the corresponding entry in orphanRecords.
+//
+// This is a synchronous operation that writes to the WAL file immediately, but without fsync.
+func (s *Store) Set(key string, value interface{}) error {
+	err := s.write(key, value)
 	if err != nil {
-		return errors.New("WAL file is empty, missing header")
+		return nil
 	}
-	if strings.TrimSpace(headerLine) != WalHeader {
-		return errors.New("invalid WAL header")
-	}
-
-	var latestValue string
-	found := false
-
-	// Process WAL records one-by-one using the helper function
-	for {
-		op, recordKey, valueLine, err := readRecord(reader)
-		if err != nil {
-			if err == io.EOF {
-				break // End of file reached
-			}
-			log.Println("go-persist: error reading record:", err)
-			break
-		}
-
-		// Process the record only if key matches
-		if recordKey != key {
-			continue
-		}
-
-		if op == "S" {
-			// Set/update operation – store the latest JSON value for the key
-			latestValue = valueLine
-			found = true
-		} else if op == "D" {
-			// Delete operation: mark the key as deleted
-			found = false
-		}
-	}
-
-	if !found {
-		return ErrKeyNotFound
-	}
-
-	// Unmarshal the JSON value into target
-	return json.Unmarshal([]byte(latestValue), target)
+	s.orphanRecords.Store(key, value)
+	return nil
 }
 
 // Shrink compacts the WAL file by discarding deleted records and

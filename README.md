@@ -224,8 +224,8 @@ type Config struct {
 }
 
 func main() {
-    // Create or open store
-    store, err := persist.Open("app.db")
+    store := persist.New()
+    err := store.Open("app.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -240,10 +240,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // NOTE: store.Read reads the entire WAL and should primarily be
-    // used for initial loading at program start, not frequent access
-    var config Config
-    err = store.Read("system_config", &config)
+    config, err := persist.Get[Config]("system_config")
     if err != nil {
         log.Fatal(err)
     }
@@ -251,7 +248,7 @@ func main() {
 
     // When you need to update the config
     config.MaxConnections = 200
-    err = store.Write("system_config", config)
+    err = store.Set("system_config", config)
     if err != nil {
         log.Fatal(err)
     }
