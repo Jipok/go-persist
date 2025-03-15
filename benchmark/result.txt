@@ -113,3 +113,37 @@ bolt       NoSync   21823ms          229,117 ops/sec        4364 ns/op
 persist.db2: 417.04 MB
 test.buntdb: 498.87 MB
 bolt.db2: 792.20 MB
+
+/////////////////////////////////////////////////////////////////////////////////////
+
+===== Benchmark Configuration =====
+Pre-populated keys: 1,000,000
+Write/read ratio: 20% write, 80% read
+Operations: 10,000,000 (across 150 goroutines)
+
+===== Benchmarking: Structs =====
+                     Elapsed           Throughput           Avg Latency
+go-persist Async     2115ms        4,728,017 ops/sec         211 ns/op, 22.4 MB
+sync.Map             2533ms        3,947,354 ops/sec         253 ns/op
+map+RWMutex          7797ms        1,282,525 ops/sec         779 ns/op
+go-persist Sync      9422ms        1,061,342 ops/sec         942 ns/op, 4.1 KB
+buntdb             117675ms           84,979 ops/sec       11767 ns/op, 47.9 MB
+bolt       NoSync   77085ms          129,726 ops/sec        7708 ns/op, 10.9 KB
+
+----- File sizes for Structs -----
+persist.db1: 72.71 MB
+buntdb.db1: 72.89 MB
+bolt.db1: 136.03 MB
+
+===== Benchmarking: Strings =====
+go-persist Async     2271ms        4,403,253 ops/sec         227 ns/op, 93.9 MB
+sync.Map             2879ms        3,473,988 ops/sec         287 ns/op
+map+RWMutex          8095ms        1,235,359 ops/sec         809 ns/op
+go-persist Set       8914ms        1,121,794 ops/sec         891 ns/op, 65.9 MB
+buntdb              39398ms          253,819 ops/sec        3939 ns/op, 94.3 MB
+bolt       NoSync   72827ms          137,312 ops/sec        7282 ns/op, 22.4 KB
+
+----- File sizes for Strings -----
+persist.db2: 226.63 MB
+test.buntdb: 130.60 MB
+bolt.db2: 152.04 MB

@@ -130,6 +130,9 @@ func benchmarkPersistStructsSync() {
 	// --- Benchmark phase: synchronous ---
 	fmt.Print("go-persist Sync   ")
 	Ops(benchOps, goroutines, func(i, thread int) {
+		// if i == 10000 {
+		// 	go persistStructMap.Store.Shrink()
+		// }
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {
 			persistStructMap.Update(key, func(upd *persist.Update[TestStruct]) {
@@ -149,7 +152,29 @@ func benchmarkPersistStructsSync() {
 			_ = val
 		}
 	})
+	persistStructMap.Store.Shrink()
 	persistStructMap.Store.Close()
+	// validatePersistedStructs()
+}
+
+// validatePersistedStructs re-opens the persistent map file and validates that all keys from 0 to prePopCount exist.
+func validatePersistedStructs() {
+	// Re-open the persistent map using the same file name as used in benchmark
+	pm, err := persist.OpenSingleMap[TestStruct]("persist_sync.db1")
+	if err != nil {
+		panic(err)
+	}
+	defer pm.Store.Close()
+
+	for i := 0; i < prePopCount; i++ {
+		key := strconv.Itoa(i)
+		value, ok := pm.Get(key)
+		if !ok {
+			panic(fmt.Sprintf("Key %s not found in persistent store", key))
+		}
+		fmt.Printf("Key: %s, Value: %+v\n", key, value)
+	}
+	fmt.Println("Validation complete: all pre-populated keys are present.")
 }
 
 // Benchmark for go-persist using asynchronous SetAsync (structs)
@@ -632,10 +657,10 @@ func main() {
 	// MemUsage = true // TODO Why wrong values for sync.Map?
 
 	// Set benchmark constants
-	prePopCount = 100000 // keys for pre-population
-	benchOps = 1000000   // number of operations during benchmark phase
-	goroutines = 150     // number of goroutines for Ops (actual load)
-	writePerc = 20       // write operations ratio
+	prePopCount = 1000000 // keys for pre-population
+	benchOps = 10000000   // number of operations during benchmark phase
+	goroutines = 150      // number of goroutines for Ops (actual load)
+	writePerc = 20        // write operations ratio
 
 	// Display benchmark configuration
 	fmt.Printf("===== Benchmark Configuration =====\n")
