@@ -214,30 +214,43 @@ func (s *Store) Delete(key string) error {
 // readRecord reads a single WAL record from the provided reader.
 // It returns the operation (op), key, value and an error if any.
 func readRecord(reader *bufio.Reader) (op string, key string, value string, err error) {
-	headerLine, err := reader.ReadString('\n')
+	// Read header line using ReadSlice to avoid extra allocations
+	headerLine, err := reader.ReadSlice('\n')
 	if err != nil {
 		return "", "", "", err
 	}
-	headerLine = strings.TrimSuffix(headerLine, "\n")
-	if strings.TrimSpace(headerLine) == "" {
-		return "", "", "", errors.New("empty record header")
+
+	// Remove trailing
+	headerLine = headerLine[:len(headerLine)-1]
+
+	// Expect at least 3 bytes: 1 byte for op, 1 for space and at least 1 for key
+	if len(headerLine) < 3 {
+		return "", "", "", errors.New("invalid record header: too short")
 	}
-	parts := strings.SplitN(headerLine, " ", 2)
-	if len(parts) != 2 {
-		return "", "", "", errors.New("invalid record header format")
+
+	// Operation is always the first character
+	op = string(headerLine[0])
+
+	// Check that the second character is a space
+	if headerLine[1] != ' ' {
+		return "", "", "", errors.New("invalid record header format: missing space after operation")
 	}
-	op, key = parts[0], parts[1]
+
+	// Key is the rest of the header
+	key = string(headerLine[2:])
 
 	// Read value line (ensure it ends with a newline)
-	valueLine, err := reader.ReadString('\n')
+	valueLine, err := reader.ReadSlice('\n')
 	if err != nil {
 		if err == io.EOF {
 			log.Printf("go-persist: incomplete record detected, reached EOF after header: %q, partial value: %q", headerLine, valueLine)
 		}
 		return "", "", "", err
 	}
-	value = strings.TrimSuffix(valueLine, "\n")
+	valueLine = valueLine[:len(valueLine)-1]
+	value = string(valueLine)
 
+	// Log unknown operations if necessary
 	if op != "S" && op != "D" {
 		log.Println("go-persist: unknown operation encountered:", op)
 	}
