@@ -326,7 +326,7 @@ For the `Set` method, even with a very long sync interval, changes are initially
 
 ## Design Considerations and Trade-offs
 
-go-persist is designed with specific goals in mind: simplicity, type safety, and performance for embedded use cases. Understanding the following considerations will help you determine if it's the right fit for your needs:
+go-persist is designed with specific goals in mind: simplicity(<1000 lines), type safety, and performance for embedded use cases. Understanding the following considerations will help you determine if it's the right fit for your needs:
 
 ### Intended Use Cases
 - **Configuration storage**: Store application settings with typed access
@@ -349,15 +349,10 @@ go-persist is designed with specific goals in mind: simplicity, type safety, and
 - Not suitable for datasets larger than available RAM
 - Provides map-like access patterns rather than database query capabilities
 
-**Simplicity Over Advanced Features**
-- Minimal codebase (<1000 lines) for easier review and understanding
-- No complex recovery mechanisms, distributed capabilities, or transaction isolation
-- `Shrink()` operation is blocking by design to keep implementation simple
-
 ### Performance and Scale Considerations
-- Tested with datasets up to ~400MB of actual data
+- Tested with datasets up to ~500MB of real data
 - WAL file grows unbounded until `Shrink()` is called
-- `Shrink()` can cause brief (up to second) pauses; best called during low-activity periods
+- No complex recovery mechanisms, distributed capabilities, or transaction isolation
 - Memory usage scales linearly with dataset size, with reasonable overhead compared to raw data
 
 For applications requiring complex queries, distributed access, full ACID compliance, strong data integrity guarantees, protection against hardware failures, or datasets larger than available memory, a traditional database system would be more appropriate.

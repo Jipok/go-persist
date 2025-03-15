@@ -32,17 +32,19 @@ var (
 
 // Store represents the WAL(write-ahead log) storage
 type Store struct {
-	mu            sync.Mutex     // protects concurrent access to the file
-	f             *os.File       // file descriptor for append operations
-	path          string         // file path used for reopening during reads
-	stopSync      chan struct{}  // channel to signal background sync to stop
-	wg            sync.WaitGroup // waitgroup for background sync goroutine
-	persistMaps   *xsync.Map     // registry of PersistMap instances
-	closedMaps    *xsync.Map     // list of map with was Close()
-	orphanRecords *xsync.Map     // stores records that do not belong to any registered map
-	syncInterval  atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
-	loaded        bool
-	ErrorHandler  func(err error)
+	mu             sync.Mutex     // protects concurrent access to the file
+	f              *os.File       // file descriptor for append operations
+	path           string         // file path used for reopening during reads
+	stopSync       chan struct{}  // channel to signal background sync to stop
+	wg             sync.WaitGroup // waitgroup for background sync goroutine and shrink
+	persistMaps    *xsync.Map     // registry of PersistMap instances
+	closedMaps     *xsync.Map     // list of map with was Close()
+	orphanRecords  *xsync.Map     // stores records that do not belong to any registered map
+	syncInterval   atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
+	shrinking      bool           // flag to indicate that a shrink operation is in progress
+	pendingRecords []string       // buffer for pending WAL records during shrink (each record already contains header+value+'\n')
+	loaded         bool
+	ErrorHandler   func(err error)
 }
 
 // New creates and initializes a new Store instance.
@@ -253,14 +255,15 @@ func (s *Store) Close() error {
 	if err != nil {
 		return err
 	}
+	s.persistMaps = nil
+	s.orphanRecords = nil
 	return s.f.Close()
 }
 
 // FSyncAll ensures complete data durability by:
 //
-// 1. Synchronizing all dirty map entries to the WAL file
-//
-// 2. Performing an fsync operation to guarantee data is physically written to disk
+//  1. Synchronizing all dirty map entries to the WAL file
+//  2. Performing an fsync operation to guarantee data is physically written to disk
 //
 // This operation provides the strongest durability guarantee, protecting against
 // both application crashes and system failures. It's automatically called
@@ -310,28 +313,40 @@ func (s *Store) write(key string, value interface{}) error {
 	if _, err = s.f.Write([]byte(header + line)); err != nil {
 		return err
 	}
+
+	// If shrinking is in progress, also append the record into pendingRecords
+	if s.shrinking {
+		s.pendingRecords = append(s.pendingRecords, header+line)
+	}
 	return nil
 }
 
 // Delete marks a key as deleted by writing a "delete" record to the log.
 // The record format consists of two lines:
-// 1. D <key>
-// 2. <Empty value line>
+//  1. D <key>
+//  2. <Empty value line>
+//
 // The newline after the empty value line serves as a marker that the delete
 // record was successfully written and can be safely processed during recovery.
 func (s *Store) Delete(key string) error {
 	if !s.loaded {
 		return ErrNotLoaded
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	header := "D " + key + "\n"
 	line := "\n"
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	defer s.orphanRecords.Delete(key)
 	if _, err := s.f.Write([]byte(header + line)); err != nil {
 		return err
+	}
+
+	// If a shrink is in progress, also record the delete operation in the pending buffer
+	if s.shrinking {
+		s.pendingRecords = append(s.pendingRecords, header+line)
 	}
 	return nil
 }
@@ -422,106 +437,139 @@ func Get[T any](s *Store, key string) (T, error) {
 func (s *Store) Set(key string, value interface{}) error {
 	err := s.write(key, value)
 	if err != nil {
-		return nil
+		return err
 	}
 	s.orphanRecords.Store(key, value)
 	return nil
 }
 
-// Shrink compacts the WAL file by discarding deleted records and
-// retaining only the latest set record for each key. The operation
-// creates a new temporary file with the compacted data and then
-// atomically replaces the original file. This helps to reclaim
-// disk space and improve read performance.
+// Shrink compacts the WAL file by discarding deleted records and redundant updates,
+// retaining only the latest state for each key. The operation is designed to be
+// minimally blocking:
+//
+//  1. Most compaction happens without locks, allowing concurrent operations
+//  2. Operations performed during shrinking are captured and preserved
+//  3. Only brief locks are used to swap files and finalize pending operations
+//
+// The function creates a temporary file with current state only, then atomically
+// replaces the original WAL file.
 func (s *Store) Shrink() error {
-	// TODO Need less lock time
-
-	// IMPORTANT REMINDER: When extending this code, always ensure that locks are acquired in a consistent order.
-	// For example, any locks on xsync.Map in map Set/Update/Delete should be obtained before acquiring s.mu,
-	// and avoid reversing this order. Violating this can lead to DEADLOCKS
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.loaded {
 		return ErrNotLoaded
 	}
-
-	// Ensure all writes are flushed to disk
-	if err := s.f.Sync(); err != nil {
-		return err
+	// Prevent concurrent shrink operations
+	s.mu.Lock()
+	if s.shrinking {
+		s.mu.Unlock()
+		return errors.New("shrink operation is already in progress")
 	}
+	defer func() {
+		s.shrinking = false
+	}()
+	s.shrinking = true
+	s.pendingRecords = nil
+	s.wg.Add(1)
+	defer s.wg.Done()
+	s.mu.Unlock()
 
-	// Open the existing WAL file for reading
-	src, err := os.Open(s.path)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	reader := bufio.NewReader(src)
-
-	// Validate WAL header
-	headerLine, err := reader.ReadString('\n')
-	if err != nil {
-		return errors.New("WAL file is empty, missing header")
-	}
-	if strings.TrimSpace(headerLine) != WalHeader {
-		return errors.New("invalid WAL header")
-	}
-
-	// Build a map to hold the latest set record for each key
-	state := make(map[string]string)
-	for {
-		// Use helper function to read one record
-		op, key, value, err := readRecord(reader)
-		if err != nil {
-			if err == io.EOF {
-				break // End of file reached
-			}
-			log.Println("go-persist: error reading record during shrink:", err)
-			break
-		}
-
-		switch op {
-		case "S":
-			// Update state with set operation value
-			state[key] = value
-		case "D":
-			// Remove key from the state on delete operation
-			delete(state, key)
-		default:
-			// Log a warning for unknown operations
-			log.Println("go-persist: unknown operation encountered during shrink:", op)
-		}
-	}
-
-	// Create a temporary file in the same directory for the compacted WAL
+	// Create temporary file for the compacted WAL
 	tmpPath := s.path + ".tmp"
 	tmpFile, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	// Ensure temporary file is removed on error
-	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-	}()
 
-	// Write the WAL header to the temporary file
+	// Write the WAL header
 	if _, err := tmpFile.WriteString(WalHeader + "\n"); err != nil {
 		return err
 	}
 
-	// Write one set record per key from the state map
-	for key, value := range state {
-		// Write record header: "S <key>\n"
-		if _, err := tmpFile.WriteString("S " + key + "\n"); err != nil {
-			return err
+	// Iterate over orphanRecords and write each record to the temporary file
+	var outErr error
+	s.orphanRecords.Range(func(key string, value interface{}) bool {
+		var valueStr string
+		// Determine if the stored orphan record is already a JSON string or needs marshaling
+		switch v := value.(type) {
+		case string:
+			valueStr = v
+		default:
+			// Marshal value to JSON representation
+			marshalled, err := json.Marshal(v)
+			if err != nil {
+				outErr = fmt.Errorf("failed to marshal orphan record for key %s: %w", key, err)
+				return false
+			}
+			valueStr = string(marshalled)
 		}
-		// Write JSON value line followed by newline
-		if _, err := tmpFile.WriteString(value + "\n"); err != nil {
+		// Write set record for key
+		if _, err := tmpFile.WriteString("S " + key + "\n"); err != nil {
+			outErr = err
+			return false
+		}
+		if _, err := tmpFile.WriteString(valueStr + "\n"); err != nil {
+			outErr = err
+			return false
+		}
+		return true
+	})
+	if outErr != nil {
+		return outErr
+	}
+
+	// Write persistMap states
+	s.persistMaps.Range(func(mapName string, pmInterface interface{}) bool {
+		if pm, ok := pmInterface.(persistMapI); ok {
+			if err := pm.writeRecords(tmpFile); err != nil {
+				outErr = err
+				return false
+			}
+		}
+		return true
+	})
+	if outErr != nil {
+		return outErr
+	}
+
+	// Sync file to disk before obtaining lock to minimize lock duration
+	if err := tmpFile.Sync(); err != nil {
+		return err
+	}
+
+	// Drain pendingRecords (operations performed during shrink) and write them.
+	// Use a loop to quickly swap out pendingRecords up to 3 times to minimize
+	// lock contention while still capturing most operations
+	for i := 0; i < 3; i++ {
+		s.mu.Lock()
+		if len(s.pendingRecords) == 0 {
+			s.mu.Unlock()
+			break
+		}
+		// Copy pendingRecords to a local variable
+		localPending := s.pendingRecords
+		s.pendingRecords = nil // clear pending records quickly
+		s.mu.Unlock()
+
+		// Write the locally copied pending records outside the lock
+		for _, rec := range localPending {
+			if _, err := tmpFile.WriteString(rec); err != nil {
+				return err
+			}
+		}
+		if err := tmpFile.Sync(); err != nil {
 			return err
 		}
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Process any remaining pendingRecords under final lock to ensure all operations are captured before file swap
+	for _, rec := range s.pendingRecords {
+		if _, err := tmpFile.WriteString(rec); err != nil {
+			return err
+		}
+	}
+	s.pendingRecords = nil
 
 	// Flush all writes to disk
 	if err := tmpFile.Sync(); err != nil {
@@ -531,17 +579,15 @@ func (s *Store) Shrink() error {
 		return err
 	}
 
-	// Close the current file to allow replacing it (especially important on Windows)
+	// Replace the old WAL: close current file, atomically rename the temporary file, and reopen the WAL
 	if err := s.f.Close(); err != nil {
 		return err
 	}
 
-	// Atomically replace the original WAL file with the compacted temporary file
 	if err := os.Rename(tmpPath, s.path); err != nil {
 		return err
 	}
 
-	// Reopen the newly compacted WAL file for appending new records
 	newFile, err := os.OpenFile(s.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		return err

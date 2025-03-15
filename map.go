@@ -3,6 +3,7 @@ package persist
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 
@@ -10,10 +11,10 @@ import (
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
-// persistMapI defines the common interface during bulk loading
+// persistMapI defines the common interface during bulk loading and Shrink()
 type persistMapI interface {
-	// processRecord applies a record (set or delete) to the in-memory map
 	processRecord(op, fullKey, valueLine string) error
+	writeRecords(w io.Writer) error
 }
 
 type PersistMap[T any] struct {
@@ -160,6 +161,34 @@ func (pm *PersistMap[T]) processRecord(op, key, value string) error {
 		pm.data.Delete(key)
 	}
 	return nil
+}
+
+// writeRecords writes all the in-memory records of the PersistMap to the provided writer.
+// Each record is written as a "set" record in the WAL format.
+// Need for Shrink()
+func (pm *PersistMap[T]) writeRecords(w io.Writer) error {
+	var err error
+	pm.data.Range(func(key string, value interface{}) bool {
+		data, e := json.Marshal(value)
+		if e != nil {
+			err = e
+			return false
+		}
+		// Full key is composed of pm.prefix (e.g. "mapName:") plus the key
+		fullKey := pm.prefix + key
+		// Write "S" (set) record: first line contains the operation and the key
+		if _, e = w.Write([]byte("S " + fullKey + "\n")); e != nil {
+			err = e
+			return false
+		}
+		// Second line contains the JSON-encoded value
+		if _, e = w.Write([]byte(string(data) + "\n")); e != nil {
+			err = e
+			return false
+		}
+		return true
+	})
+	return err
 }
 
 // Get retrieves the value associated with the key from the in-memory map.

@@ -90,7 +90,7 @@ func TestStore_Shrink(t *testing.T) {
 	}
 
 	// Overwrite key "a" with a new value
-	if err := store.Set("a", 100); err != nil {
+	if err := store.Set("a", "the string"); err != nil {
 		t.Fatalf("failed to update key 'a': %v", err)
 	}
 
@@ -104,17 +104,21 @@ func TestStore_Shrink(t *testing.T) {
 		t.Fatalf("failed to shrink store: %v", err)
 	}
 
+	store2 := New()
+	store2.Open(store.path)
+	defer store2.Close()
+
 	// Verify that key "a" holds the updated value
-	valA, err := Get[int](store, "a")
+	valA, err := Get[string](store2, "a")
 	if err != nil {
 		t.Fatalf("failed to get key 'a': %v", err)
 	}
-	if valA != 100 {
-		t.Fatalf("expected key 'a' to have value 100, got %d", valA)
+	if valA != "the string" {
+		t.Fatalf("expected key 'a' to have value `the string`, got %s", valA)
 	}
 
 	// Verify that key "c" retains own value
-	valC, err := Get[int](store, "c")
+	valC, err := Get[int](store2, "c")
 	if err != nil {
 		t.Fatalf("failed to get key 'c': %v", err)
 	}
@@ -123,7 +127,7 @@ func TestStore_Shrink(t *testing.T) {
 	}
 
 	// Verify that key "b" (deleted) not found
-	_, err = Get[int](store, "b")
+	_, err = Get[int](store2, "b")
 	if err == nil {
 		t.Fatal("expected error when getting deleted key 'b', got nil")
 	} else if !errors.Is(err, ErrKeyNotFound) {
