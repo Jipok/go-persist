@@ -21,17 +21,8 @@ func TestPersistMap_SetGet(t *testing.T) {
 	defer os.Remove(path)
 
 	// Create a new WAL store.
-	store, err := Open(path)
-	if err != nil {
-		t.Fatalf("Failed to create store: %v", err)
-	}
-	defer store.Close()
-
-	// Create a PersistMap[string] with namespace "test".
-	pm, err := Map[string](store, "test")
-	if err != nil {
-		t.Fatalf("Failed to create persist map: %v", err)
-	}
+	pm, err := OpenSingleMap[string](path)
+	defer pm.Store.Close()
 
 	// Set a value.
 	pm.Set("foo", "bar") // Updated: no error returned
@@ -71,15 +62,9 @@ func TestPersistMap_Complex(t *testing.T) {
 	defer os.Remove(path)
 
 	// Create a new WAL store.
-	store, err := Open(path)
+	pm, err := OpenSingleMap[int](path)
 	if err != nil {
-		t.Fatalf("Failed to create store: %v", err)
-	}
-
-	// Create a PersistMap[int] with namespace "complex".
-	pm, err := Map[int](store, "complex")
-	if err != nil {
-		t.Fatalf("Failed to create persist map: %v", err)
+		t.Fatal(err)
 	}
 
 	// Launch multiple goroutines performing random Set/Delete operations.
@@ -142,19 +127,19 @@ func TestPersistMap_Complex(t *testing.T) {
 	}
 
 	// Close the store to flush all operations.
-	if err := store.Close(); err != nil {
+	if err := pm.Store.Close(); err != nil {
 		t.Fatalf("Store close failed: %v", err)
 	}
 
 	// ---------- Reopen and validate state from WAL ----------
 
 	// Reopen store.
-	store2, err := Open(path)
+	store2 := New()
+	err = store2.Open(path)
 	if err != nil {
 		t.Fatalf("Failed to reopen store: %v", err)
 	}
-	// Note: we do not defer store2.Close() here because we'll close it explicitly.
-	pmReloaded, err := Map[int](store2, "complex")
+	pmReloaded, err := Map[int](store2, "")
 	if err != nil {
 		t.Fatalf("Failed to reload persist map: %v", err)
 	}
@@ -190,15 +175,11 @@ func TestPersistMap_Complex(t *testing.T) {
 
 	// ---------- Reopen once more after shrink and validate state ----------
 
-	store3, err := Open(path)
-	if err != nil {
-		t.Fatalf("Failed to reopen store after shrink: %v", err)
-	}
-	defer store3.Close()
-	pmReloaded2, err := Map[int](store3, "complex")
+	pmReloaded2, err := OpenSingleMap[int](path)
 	if err != nil {
 		t.Fatalf("Failed to reload persist map after shrink: %v", err)
 	}
+	defer pmReloaded2.Store.Close()
 
 	// Final state verification after shrink.
 	for i := 0; i < 10; i++ {
@@ -232,13 +213,14 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 	defer os.Remove(walPath)
 
 	// Open a new WAL store.
-	store, err := Open(walPath)
+	store := New()
+	err = store.Open(walPath)
 	if err != nil {
 		t.Fatalf("Failed to open store: %v", err)
 	}
 
 	// Create first PersistMap[string] with empty namespace
-	map1, err := Map[string](store, "")
+	map1, err := Map[string](store, "first")
 	if err != nil {
 		t.Fatalf("Failed to create persist map 'first': %v", err)
 	}
@@ -269,17 +251,20 @@ func TestPersistMap_MultipleMaps(t *testing.T) {
 
 	// ---------- Reopen and validate state from WAL for multiple maps ----------
 
-	// Reopen the store.
-	store2, err := Open(walPath)
+	store2 := New()
+
+	// Reload the maps from the store. Pre-open
+	reloadedMap1, err := Map[string](store2, "first")
+	if err != nil {
+		t.Fatalf("Failed to reload persist map 'first': %v", err)
+	}
+
+	err = store2.Open(walPath)
 	if err != nil {
 		t.Fatalf("Failed to reopen store: %v", err)
 	}
 
-	// Reload the maps from the store
-	reloadedMap1, err := Map[string](store2, "")
-	if err != nil {
-		t.Fatalf("Failed to reload persist map 'first': %v", err)
-	}
+	// After-open
 	reloadedMap2, err := Map[int](store2, "second")
 	if err != nil {
 		t.Fatalf("Failed to reload persist map 'second': %v", err)
@@ -330,13 +315,14 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 	defer os.Remove(path)
 
 	// Open a new WAL store.
-	store, err := Open(path)
+	store := New()
+	err = store.Open(path)
 	if err != nil {
 		t.Fatalf("Failed to open store: %v", err)
 	}
 
-	// Create a PersistMap[int] with namespace "complexUpdate".
-	pm, err := Map[int](store, "complexUpdate")
+	// Create a PersistMap[int] with empty namespace
+	pm, err := Map[int](store, "")
 	if err != nil {
 		t.Fatalf("Failed to create persist map: %v", err)
 	}
@@ -440,12 +426,7 @@ func TestPersistMap_ComplexUpdateOperations(t *testing.T) {
 
 	// ---------- Reopen store and verify that persisted state matches ----------
 
-	store2, err := Open(path)
-	if err != nil {
-		t.Fatalf("Failed to reopen store: %v", err)
-	}
-	defer store2.Close()
-	pmReloaded, err := Map[int](store2, "complexUpdate")
+	pmReloaded, err := OpenSingleMap[int](path)
 	if err != nil {
 		t.Fatalf("Failed to reload persist map: %v", err)
 	}

@@ -112,12 +112,11 @@ func benchmarkSyncMapStructs() {
 // Benchmark for go-persist using synchronous Set (structs)
 func benchmarkPersistStructsSync() {
 	os.Remove("persist_sync.db1")
-	persistStore, err := persist.Open("persist_sync.db1")
+	// Create a persistent map for TestStruct
+	persistStructMap, err := persist.OpenSingleMap[TestStruct]("persist_sync.db1")
 	if err != nil {
 		panic(err)
 	}
-	// Create a persistent map for TestStruct
-	persistStructMap, _ := persist.Map[TestStruct](persistStore, "test_struct")
 
 	// --- Pre-population phase using Set ---
 	for i := 0; i < prePopCount; i++ {
@@ -150,18 +149,17 @@ func benchmarkPersistStructsSync() {
 			_ = val
 		}
 	})
-	persistStore.Close()
+	persistStructMap.Store.Close()
 }
 
 // Benchmark for go-persist using asynchronous SetAsync (structs)
 func benchmarkPersistStructsAsync() {
 	os.Remove("persist.db1")
-	persistStore, err := persist.Open("persist.db1")
+	// Create a persistent map for TestStruct
+	persistStructMap, err := persist.OpenSingleMap[TestStruct]("persist.db1")
 	if err != nil {
 		panic(err)
 	}
-	// Create a persistent map for TestStruct
-	persistStructMap, _ := persist.Map[TestStruct](persistStore, "test_struct")
 
 	// --- Pre-population phase using SetAsync ---
 	for i := 0; i < prePopCount; i++ {
@@ -198,18 +196,16 @@ func benchmarkPersistStructsAsync() {
 			_ = val
 		}
 	})
-	persistStore.Close()
+	persistStructMap.Store.Close()
 }
 
 // Benchmark for go-persist using SetFSync (structs)
 func benchmarkPersistStructsFSync() {
 	os.Remove("persist_fsync.db1")
-	persistStore, err := persist.Open("persist_fsync.db1")
+	persistStructMap, err := persist.OpenSingleMap[TestStruct]("persist_fsync.db1")
 	if err != nil {
 		panic(err)
 	}
-	// Create a persistent map for TestStruct
-	persistStructMap, _ := persist.Map[TestStruct](persistStore, "test_struct")
 
 	// --- Pre-population phase using SetFSync ---
 	for i := 0; i < prePopCount; i++ {
@@ -239,7 +235,7 @@ func benchmarkPersistStructsFSync() {
 			_ = val
 		}
 	})
-	persistStore.Close()
+	persistStructMap.Store.Close()
 }
 
 // Benchmark for BuntDB (structs with JSON serialization)
@@ -459,11 +455,10 @@ func benchmarkSyncMapStrings() {
 // Benchmark for go-persist using synchronous Set (strings)
 func benchmarkPersistStringsSync() {
 	os.Remove("persist.db2")
-	persistStore, err := persist.Open("persist.db2")
+	persistMap, err := persist.OpenSingleMap[string]("persist.db2")
 	if err != nil {
 		panic(err)
 	}
-	persistMap, _ := persist.Map[string](persistStore, "test")
 	stringValue := "gq2ip4;9209;4fm2d1d3DJ138D2L38\t2FP2938FP238HFP2H  FDAUWF1\t2"
 
 	// --- Pre-population phase using Set ---
@@ -486,17 +481,16 @@ func benchmarkPersistStringsSync() {
 			_ = val
 		}
 	})
-	persistStore.Close()
+	persistMap.Store.Close()
 }
 
 // Benchmark for go-persist using asynchronous SetAsync (strings)
 func benchmarkPersistStringsAsync() {
 	os.Remove("persist_async.db2")
-	persistStore, err := persist.Open("persist_async.db2")
+	persistMap, err := persist.OpenSingleMap[string]("persist_async.db2")
 	if err != nil {
 		panic(err)
 	}
-	persistMap, _ := persist.Map[string](persistStore, "test")
 	stringValue := "gq2ip4;9209;4fm2d1d3DJ138D2L38\t2FP2938FP238HFP2H  FDAUWF1\t2"
 
 	// --- Pre-population phase using SetAsync ---
@@ -519,7 +513,7 @@ func benchmarkPersistStringsAsync() {
 			_ = val
 		}
 	})
-	persistStore.Close()
+	persistMap.Store.Close()
 }
 
 // Benchmark for BuntDB (strings)

@@ -62,7 +62,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    defer users.Close()
+    defer users.Store.Close()
 
     // Store a user with balanced performance/durability
     users.Set("alice", User{
@@ -128,17 +128,8 @@ type Session struct {
 }
 
 func main() {
-    // Create or open store
-    store, err := persist.Open("app.db")
-    if err != nil {
-        log.Fatal(err)
-    }
+    store := persist.New()
     defer store.Close()
-
-    // Compact the store to reclaim space
-    if err := store.Shrink(); err != nil {
-        log.Fatal(err)
-    }
 
     // Create typed maps for different entity types
     users, err := persist.Map[User](store, "users")
@@ -153,6 +144,17 @@ func main() {
 
     sessions, err := persist.Map[Session](store, "sessions")
     if err != nil {
+        log.Fatal(err)
+    }
+
+    // Create or load store file
+    err := persist.Open("app.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Compact the store to reclaim space
+    if err := store.Shrink(); err != nil {
         log.Fatal(err)
     }
 
@@ -208,7 +210,7 @@ myMap.Range(func(key string, value ValueType) bool {
 })
 
 // Clean up resources
-myMap.Close()
+myMap.Free()
 ```
 
 ### Using the Basic Store API

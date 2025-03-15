@@ -1,25 +1,32 @@
 package persist
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"log"
-	"os"
 	"strings"
 
+	"github.com/goccy/go-json"
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
+// persistMapI defines the common interface during bulk loading
+type persistMapI interface {
+	// processRecord applies a record (set or delete) to the in-memory map
+	processRecord(op, fullKey, valueLine string) error
+}
+
 type PersistMap[T any] struct {
-	store  *Store     // underlying WAL store
+	Store  *Store     // underlying WAL store
 	data   *xsync.Map // in-memory map holding decoded values of type T
 	prefix string     // namespace prefix for keys (e.g. "mapName:")
 	dirty  *xsync.Map // set of dirty keys; value is struct{} as a dummy
 }
 
-var ErrMapAlreadyExists = errors.New("persist map with the given name already exists in store")
+var (
+	ErrMapAlreadyExists = errors.New("persist map with the given name already exists in store")
+	ErrTooLate          = errors.New("cannot register new map after store has been loaded")
+)
 
 // OpenSingleMap is the simplest way to get started with a persistent map when you need just one map per file.
 // It opens the store, compacts the WAL, and initializes the map in a single operation.
@@ -27,21 +34,22 @@ var ErrMapAlreadyExists = errors.New("persist map with the given name already ex
 // It returns a PersistMap that represents a thread-safe persistent key-value store with type-safe values of type T.
 // This map maintains an in-memory representation for fast access while ensuring durability through the WAL.
 func OpenSingleMap[T any](path string) (*PersistMap[T], error) {
-	// Open the WAL store
-	store, err := Open(path)
+	store := New()
+
+	// Create a map with an empty namespace
+	pm, err := Map[T](store, "")
+	if err != nil {
+		return nil, err
+	}
+
+	// Load records
+	err = store.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
 	// Optimize storage by compacting the WAL file
 	if err := store.Shrink(); err != nil {
-		store.Close()
-		return nil, err
-	}
-
-	// Create a map with an empty namespace
-	pm, err := Map[T](store, "")
-	if err != nil {
 		store.Close()
 		return nil, err
 	}
@@ -60,27 +68,46 @@ func Map[T any](store *Store, mapName string) (*PersistMap[T], error) {
 		return nil, err
 	}
 
+	_, closed := store.closedMaps.Load(mapName)
+	if closed {
+		return nil, errors.New("cannot reuse a map that was previously closed")
+	}
+
 	_, found := store.persistMaps.Load(mapName)
 	if found {
 		return nil, ErrMapAlreadyExists
 	}
 
 	pm := &PersistMap[T]{
-		store:  store,
+		Store:  store,
 		data:   xsync.NewMap(), // Using xsync.Map instead of built-in map
 		prefix: mapName + ":",  // Using "mapName:" as prefix for keys
 		dirty:  xsync.NewMap(), // Initialize dirty set
 	}
 
-	// Load data from the WAL file with immediate validation
-	if err := pm.load(); err != nil {
-		return nil, err
-	}
-
 	// Register this PersistMap instance in the Store registry
 	store.persistMaps.Store(mapName, pm)
 
-	return pm, nil
+	// If the store is already loaded, process any orphan records for this map
+	var err error
+	if store.loaded {
+		store.orphanRecords.Range(func(key string, value interface{}) bool {
+			// Check if orphan key belongs to this map namespace
+			if strings.HasPrefix(key, pm.prefix) {
+				realKey := key[len(pm.prefix):]
+				// Process orphan record as a "set" record
+				if innerErr := pm.processRecord("S", realKey, value.(string)); innerErr != nil {
+					err = fmt.Errorf("error processing orphan record for key `%s`: %s", key, innerErr)
+					return false
+				}
+				// Delete processed orphan record
+				store.orphanRecords.Delete(key)
+			}
+			return true
+		})
+	}
+
+	return pm, err
 }
 
 // Sync writes all pending changes made by Async methods to the WAL file.
@@ -100,14 +127,14 @@ func (pm *PersistMap[T]) Sync() {
 			// Lock is taken for this key. Now we can read the in-memory value
 			if v, ok := pm.data.Load(key); ok {
 				// Try persisting the current value in WAL
-				if err := pm.store.Write(namespacedKey, v); err != nil {
+				if err := pm.Store.Write(namespacedKey, v); err != nil {
 					log.Println("go-persist: Background flush set failed for key:", key, "error:", err)
 					// Return oldValue and false, so that the dirty flag is not removed
 					return oldValue, false
 				}
 			} else {
 				// If the key is no longer in data, try to delete it from WAL
-				if err := pm.store.Delete(namespacedKey); err != nil {
+				if err := pm.Store.Delete(namespacedKey); err != nil {
 					log.Println("go-persist: Background flush delete failed for key:", key, "error:", err)
 					return oldValue, false
 				}
@@ -120,56 +147,18 @@ func (pm *PersistMap[T]) Sync() {
 	})
 }
 
-// load reconstructs the in-memory map by replaying all records from the storage file.
-// It processes only those records whose key starts with the map's prefix.
-func (pm *PersistMap[T]) load() error {
-	// Open file for reading from the beginning
-	f, err := os.Open(pm.store.path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-
-	// Read and validate WAL header line
-	headerLine, err := reader.ReadString('\n')
-	if err != nil {
-		return errors.New("WAL file is empty, missing header")
-	}
-	if strings.TrimSpace(headerLine) != WalHeader {
-		return errors.New("invalid WAL header")
-	}
-
-	// Process records
-	for {
-		op, fullKey, valueLine, err := readRecord(reader)
-		if err != nil {
-			if err == io.EOF {
-				break // End of file reached
-			}
+// processRecord applies a record from the WAL to the in-memory map
+func (pm *PersistMap[T]) processRecord(op, key, value string) error {
+	switch op {
+	case "S":
+		var v T
+		if err := json.Unmarshal([]byte(value), &v); err != nil {
 			return err
 		}
-
-		// Process only records that belong to this PersistMap (i.e. key starts with pm.prefix)
-		if !strings.HasPrefix(fullKey, pm.prefix) {
-			continue
-		}
-		// Remove prefix from key before storing in the in-memory map
-		key := strings.TrimPrefix(fullKey, pm.prefix)
-
-		if op == "S" {
-			var v T
-			// Unmarshal the JSON value into type T for validation
-			if err := json.Unmarshal([]byte(valueLine), &v); err != nil {
-				return err
-			}
-			pm.data.Store(key, v)
-		} else if op == "D" {
-			pm.data.Delete(key)
-		}
+		pm.data.Store(key, v)
+	case "D":
+		pm.data.Delete(key)
 	}
-
 	return nil
 }
 
@@ -209,8 +198,8 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 	pm.data.Compute(key, func(oldValue interface{}, loaded bool) (newValue interface{}, delete bool) {
 		namespacedKey := pm.prefix + key
 		// Write S record to disk(page cache) immediately
-		if err := pm.store.Write(namespacedKey, value); err != nil {
-			pm.store.ErrorHandler(err)
+		if err := pm.Store.Write(namespacedKey, value); err != nil {
+			pm.Store.ErrorHandler(err)
 		}
 		// Update in-memory xsync.Map
 		return value, false
@@ -224,9 +213,9 @@ func (pm *PersistMap[T]) Set(key string, value T) {
 func (pm *PersistMap[T]) SetFSync(key string, value T) error {
 	pm.Set(key, value)
 	// Flush (fsync) to ensure durability
-	pm.store.mu.Lock()
-	defer pm.store.mu.Unlock()
-	return pm.store.f.Sync()
+	pm.Store.mu.Lock()
+	defer pm.Store.mu.Unlock()
+	return pm.Store.f.Sync()
 }
 
 // DeleteAsync removes the key from the in-memory map and marks it as dirty for background flush
@@ -242,8 +231,8 @@ func (pm *PersistMap[T]) Delete(key string) {
 	pm.data.Compute(key, func(oldValue interface{}, loaded bool) (newValue interface{}, delete bool) {
 		namespacedKey := pm.prefix + key
 		// Write D record to disk(page cache) immediately
-		if err := pm.store.Delete(namespacedKey); err != nil {
-			pm.store.ErrorHandler(err)
+		if err := pm.Store.Delete(namespacedKey); err != nil {
+			pm.Store.ErrorHandler(err)
 		}
 		// Remove the key from the in-memory xsync.Map
 		return oldValue, true
@@ -255,9 +244,9 @@ func (pm *PersistMap[T]) Delete(key string) {
 func (pm *PersistMap[T]) DeleteFSync(key string) error {
 	pm.Delete(key)
 	// Flush (fsync) to ensure durability
-	pm.store.mu.Lock()
-	defer pm.store.mu.Unlock()
-	return pm.store.f.Sync()
+	pm.Store.mu.Lock()
+	defer pm.Store.mu.Unlock()
+	return pm.Store.f.Sync()
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -384,15 +373,15 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newVa
 		switch upd.action {
 		case actionDelete:
 			// Write D record atomically inside Compute callback
-			if err := pm.store.Delete(namespacedKey); err != nil {
-				pm.store.ErrorHandler(err)
+			if err := pm.Store.Delete(namespacedKey); err != nil {
+				pm.Store.ErrorHandler(err)
 			}
 			// Returning true signals removal of the key from the map
 			return nil, true
 		case actionSet:
 			// Write S record atomically inside Compute callback
-			if err := pm.store.Write(namespacedKey, upd.Value); err != nil {
-				pm.store.ErrorHandler(err)
+			if err := pm.Store.Write(namespacedKey, upd.Value); err != nil {
+				pm.Store.ErrorHandler(err)
 			}
 			// Returning false signals that the key should be kept in the map
 			return upd.Value, false
@@ -427,9 +416,9 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newVa
 func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *Update[T])) (newValue T, existed bool, err error) {
 	newValue, existed = pm.Update(key, updater)
 	// Flush (fsync) to ensure durability
-	pm.store.mu.Lock()
-	defer pm.store.mu.Unlock()
-	err = pm.store.f.Sync()
+	pm.Store.mu.Lock()
+	defer pm.Store.mu.Unlock()
+	err = pm.Store.f.Sync()
 	return
 }
 
@@ -460,20 +449,21 @@ func (pm *PersistMap[T]) Range(f func(key string, value T) bool) {
 	})
 }
 
-// Close unregisters the PersistMap from its parent store and releases all internal resources.
+// Free unregisters the PersistMap from its parent store and releases all internal resources.
 // After calling Close, the PersistMap becomes invalid and should no longer be used.
 // Multiple calls to Close are safe, with subsequent calls having no effect.
-func (pm *PersistMap[T]) Close() {
-	if pm.store == nil {
+func (pm *PersistMap[T]) Free() {
+	if pm.Store == nil {
 		return
 	}
 
 	mapName := strings.TrimSuffix(pm.prefix, ":")
-	pm.store.persistMaps.Delete(mapName)
+	pm.Store.persistMaps.Delete(mapName)
+	pm.Store.closedMaps.Store(mapName, struct{}{})
 
 	pm.Sync()
 
-	pm.store = nil
+	pm.Store = nil
 	pm.data = nil
 	pm.dirty = nil
 }

@@ -2,7 +2,6 @@ package persist
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/goccy/go-json"
 	"github.com/puzpuzpuz/xsync/v3"
 )
 
@@ -27,74 +27,30 @@ const DefaultSyncInterval = time.Second
 var (
 	// ErrKeyNotFound is returned when the key is not found in the storage
 	ErrKeyNotFound = errors.New("key not found")
+	ErrNotLoaded   = errors.New("store is not loaded")
 )
 
 // Store represents the WAL(write-ahead log) storage
 type Store struct {
-	mu           sync.Mutex     // protects concurrent access to the file
-	f            *os.File       // file descriptor for append operations
-	path         string         // file path used for reopening during reads
-	stopSync     chan struct{}  // channel to signal background sync to stop
-	wg           sync.WaitGroup // waitgroup for background sync goroutine
-	persistMaps  *xsync.Map     // registry of PersistMap instances (values are Closer interface)
-	syncInterval atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
-	ErrorHandler func(err error)
+	mu            sync.Mutex     // protects concurrent access to the file
+	f             *os.File       // file descriptor for append operations
+	path          string         // file path used for reopening during reads
+	stopSync      chan struct{}  // channel to signal background sync to stop
+	wg            sync.WaitGroup // waitgroup for background sync goroutine
+	persistMaps   *xsync.Map     // registry of PersistMap instances
+	closedMaps    *xsync.Map     // list of map with was Close()
+	orphanRecords *xsync.Map     // stores records that do not belong to any registered map
+	syncInterval  atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
+	loaded        bool
+	ErrorHandler  func(err error)
 }
 
-// Open creates or opens a persistent storage file and returns a new Store instance
-func Open(path string) (*Store, error) {
-	// Open the file in read/write and append mode (create if not exist)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate or write WAL header
-	stat, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, err
-	}
-
-	if stat.Size() == 0 {
-		// File is new, write header
-		if _, err := f.Write([]byte(WalHeader + "\n")); err != nil {
-			f.Close()
-			return nil, err
-		}
-		if err := f.Sync(); err != nil {
-			f.Close()
-			return nil, err
-		}
-	} else {
-		// Validate existing header
-		// Seek to the beginning to read the header line
-		if _, err := f.Seek(0, 0); err != nil {
-			f.Close()
-			return nil, err
-		}
-		reader := bufio.NewReader(f)
-		headerLine, err := reader.ReadString('\n')
-		if err != nil {
-			f.Close()
-			return nil, err
-		}
-		if strings.TrimSpace(headerLine) != WalHeader {
-			f.Close()
-			return nil, errors.New("invalid WAL header, unsupported WAL file")
-		}
-		// Seek back to the end for appending writes
-		if _, err := f.Seek(0, io.SeekEnd); err != nil {
-			f.Close()
-			return nil, err
-		}
-	}
-
+func New() *Store {
 	s := &Store{
-		f:           f,
-		path:        path,
-		stopSync:    make(chan struct{}),
-		persistMaps: xsync.NewMap(),
+		persistMaps:   xsync.NewMap(),
+		closedMaps:    xsync.NewMap(),
+		orphanRecords: xsync.NewMap(),
+		stopSync:      make(chan struct{}),
 	}
 	s.SetSyncInterval(DefaultSyncInterval)
 
@@ -102,7 +58,74 @@ func Open(path string) (*Store, error) {
 		log.Fatal("go-persist: ", err)
 	}
 
-	// Start background FSyncAll
+	return s
+}
+
+// Open opens the persistent storage file, validates/writes the WAL header,
+// starts the background sync goroutine and immediately loads all WAL records
+// into the registered maps.
+func (s *Store) Open(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loaded {
+		return errors.New("store is already loaded")
+	}
+
+	var err error
+	s.path = path
+	// Open file in read/write append mode (create if not exists)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+
+	// Validate or write WAL header
+	stat, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+
+	if stat.Size() == 0 {
+		// File is new, write header
+		if _, err := f.Write([]byte(WalHeader + "\n")); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Sync(); err != nil {
+			f.Close()
+			return err
+		}
+	} else {
+		// Validate existing header
+		if _, err := f.Seek(0, 0); err != nil {
+			f.Close()
+			return err
+		}
+		reader := bufio.NewReader(f)
+		headerLine, err := reader.ReadString('\n')
+		if err != nil {
+			f.Close()
+			return err
+		}
+		if strings.TrimSpace(headerLine) != WalHeader {
+			f.Close()
+			return errors.New("invalid WAL header, unsupported WAL file")
+		}
+		// Seek back to the end for appending writes
+		if _, err := f.Seek(0, io.SeekEnd); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	s.f = f
+
+	if err := s.processRecords(); err != nil {
+		f.Close()
+		return err
+	}
+
+	// Start background FSyncAll goroutine
 	s.wg.Add(1)
 	go func() {
 		timer := time.NewTimer(s.GetSyncInterval())
@@ -111,8 +134,8 @@ func Open(path string) (*Store, error) {
 		for {
 			select {
 			case <-timer.C:
-				err := s.FSyncAll()
-				if err != nil {
+				// Attempt fsync all maps and file
+				if err := s.FSyncAll(); err != nil {
 					s.ErrorHandler(fmt.Errorf("background sync failed: %s", err))
 				}
 				timer.Reset(s.GetSyncInterval())
@@ -122,14 +145,85 @@ func Open(path string) (*Store, error) {
 		}
 	}()
 
-	return s, nil
+	s.loaded = true
+	return nil
 }
 
-// Saves all pending changes and stops the background flush goroutine
+// processRecords reads the WAL file once and dispatches records to all registered PersistMap instances.
+// If a record's key does not match any map (determined by the part before the colon), it is stored in orphanRecords.
+func (s *Store) processRecords() error {
+	f, err := os.Open(s.path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+
+	// Skip header
+	_, _ = reader.ReadString('\n')
+
+	// recordData holds the parsed data for each record
+	type recordData struct {
+		op, fullKey, valueStr string
+	}
+
+	// Create a buffered channel to decouple reading from processing
+	recordsChan := make(chan recordData, 100)
+
+	// Start a goroutine for reading the records concurrently
+	go func() {
+		defer close(recordsChan)
+		for {
+			op, fullKey, valueStr, err := readRecord(reader)
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				log.Println("go-persist: error reading record:", err)
+				break
+			}
+			recordsChan <- recordData{op: op, fullKey: fullKey, valueStr: valueStr}
+		}
+	}()
+
+	// Process the records in the same order as they were read
+	for rec := range recordsChan {
+		idx := strings.Index(rec.fullKey, ":")
+		candidate := ""
+		if idx >= 0 {
+			candidate = rec.fullKey[:idx]
+		}
+
+		if mapVal, ok := s.persistMaps.Load(candidate); ok {
+			// Registered map found - process the record via its interface
+			pm, _ := mapVal.(persistMapI)
+			if err := pm.processRecord(rec.op, rec.fullKey[idx+1:], rec.valueStr); err != nil {
+				log.Println("go-persist: failed processing record for key", rec.fullKey, "error:", err)
+			}
+		} else {
+			// No matching map – save the raw record as a string in orphanRecords
+			switch rec.op {
+			case "S":
+				s.orphanRecords.Store(rec.fullKey, rec.valueStr)
+			case "D":
+				s.orphanRecords.Delete(rec.fullKey)
+			}
+		}
+	}
+
+	return nil
+}
+
+// Saves all pending changes and stops the background sync goroutine
 // Then closes the underlying file.
 //
 // The Store should not be used after calling Close.
 func (s *Store) Close() error {
+	if !s.loaded {
+		return ErrNotLoaded
+	}
+
 	// Signal background FSyncAll to stop and wait for it to finish
 	close(s.stopSync)
 	s.wg.Wait()
@@ -152,7 +246,10 @@ func (s *Store) Close() error {
 // periodically based on the configured syncInterval, but can also be called
 // manually when immediate durability is required.
 func (s *Store) FSyncAll() error {
-	// Flush Maps
+	if !s.loaded {
+		return ErrNotLoaded
+	}
+	// Sync Maps
 	s.persistMaps.Range(func(key string, val interface{}) bool {
 		pm, _ := val.(interface{ Sync() })
 		pm.Sync()
@@ -171,6 +268,9 @@ func (s *Store) FSyncAll() error {
 // The newline after the value serves as a marker that the record was
 // successfully written and can be safely processed during recovery.
 func (s *Store) Write(key string, value interface{}) error {
+	if !s.loaded {
+		return ErrNotLoaded
+	}
 	if err := ValidateKey(key); err != nil {
 		return err
 	}
@@ -199,6 +299,9 @@ func (s *Store) Write(key string, value interface{}) error {
 // The newline after the empty value line serves as a marker that the delete
 // record was successfully written and can be safely processed during recovery.
 func (s *Store) Delete(key string) error {
+	if !s.loaded {
+		return ErrNotLoaded
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -265,6 +368,9 @@ func (s *Store) Read(key string, target interface{}) error {
 	// Lock for consistency (we use a separate file descriptor for reading)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.loaded {
+		return ErrNotLoaded
+	}
 
 	// Open file for reading from the beginning
 	f, err := os.Open(s.path)
@@ -334,6 +440,9 @@ func (s *Store) Shrink() error {
 	// and avoid reversing this order. Violating this can lead to DEADLOCKS
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.loaded {
+		return ErrNotLoaded
+	}
 
 	// Ensure all writes are flushed to disk
 	if err := s.f.Sync(); err != nil {

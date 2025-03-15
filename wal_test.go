@@ -24,7 +24,8 @@ func createTempStore(t *testing.T) (*Store, string) {
 		os.Remove(path)
 	})
 
-	store, err := Open(path)
+	store := New()
+	err = store.Open(path)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -207,7 +208,8 @@ func TestStore_IncompleteRecord(t *testing.T) {
 	tmpFile.Close()
 
 	// Reopen the store using the same WAL file with an incomplete record at the end.
-	store, err := Open(path)
+	store := New()
+	err = store.Open(path)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -279,7 +281,8 @@ func TestStore_RecordValueWithoutNewline(t *testing.T) {
 	tmpFile.Close()
 
 	// Open the store using the temporary WAL file with the incomplete record.
-	store, err := Open(path)
+	store := New()
+	err = store.Open(path)
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
@@ -356,8 +359,9 @@ func TestStore_InvalidRecordMidFile(t *testing.T) {
 	}
 	tmpFile.Close()
 
-	// Open the store using the existing file
-	store, err := Open(path)
+	// Open the store
+	store := New()
+	err = store.Open(path)
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
