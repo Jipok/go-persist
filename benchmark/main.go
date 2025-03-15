@@ -1,16 +1,19 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/Jipok/go-persist"
-	"github.com/boltdb/bolt"
+	"github.com/goccy/go-json"
 	"github.com/tidwall/buntdb"
+	bolt "go.etcd.io/bbolt"
 )
 
 type TestStruct struct {
@@ -506,6 +509,7 @@ func benchmarkPersistStringsSync() {
 			_ = val
 		}
 	})
+	persistMap.Store.Shrink()
 	persistMap.Store.Close()
 }
 
@@ -652,6 +656,22 @@ func benchmarkBoltStrings() {
 // Main
 /////////////////////////////////////////////////////////////////////////////////////////
 
+// flushPageCache flushes the filesystem page cache.
+// NOTE: This requires root privileges.
+func flushPageCache() {
+	// Execute sync command to flush file system buffers
+	if err := exec.Command("sync").Run(); err != nil {
+		log.Fatal("flushPageCache: sync: ", err)
+	}
+	// Write "3" to /proc/sys/vm/drop_caches to drop page cache
+	// Using tee to handle shell redirection under bash.
+	err := exec.Command("bash", "-c", "echo 3 > /proc/sys/vm/drop_caches").Run()
+	if err != nil {
+		log.Fatal("flushPageCache: drop_caches: ", err)
+	}
+	time.Sleep(time.Second)
+}
+
 func main() {
 	Output = os.Stdout
 	// MemUsage = true // TODO Why wrong values for sync.Map?
@@ -668,14 +688,18 @@ func main() {
 	fmt.Printf("Write/read ratio: %d%% write, %d%% read\n", writePerc, 100-writePerc)
 	fmt.Printf("Operations: %s (across %d goroutines)\n", commaize(benchOps), goroutines)
 	fmt.Println()
+	flushPageCache()
 
 	fmt.Println("===== Benchmarking: Structs =====")
 	fmt.Printf("                     Elapsed           Throughput           Avg Latency\n")
 	benchmarkPersistStructsAsync()
 	benchmarkSyncMapStructs()
 	benchmarkMapRWMutexStructs()
+	flushPageCache()
 	benchmarkPersistStructsSync()
+	flushPageCache()
 	benchmarkBuntDBStructs(buntdb.EverySecond) // Like go-persist Async
+	flushPageCache()
 	benchmarkBoltStructs(true)
 	// benchmarkPersistStructsFSync()        // SLOW
 	// benchmarkBoltStructs(false)           // Like go-persist FSync
@@ -688,11 +712,15 @@ func main() {
 
 	if true {
 		fmt.Println("\n===== Benchmarking: Strings =====")
+		flushPageCache()
 		benchmarkPersistStringsAsync()
 		benchmarkSyncMapStrings()
 		benchmarkMapRWMutexStrings()
+		flushPageCache()
 		benchmarkPersistStringsSync()
+		flushPageCache()
 		benchmarkBuntDBStrings()
+		flushPageCache()
 		benchmarkBoltStrings()
 
 		fmt.Println("\n----- File sizes for Strings -----")

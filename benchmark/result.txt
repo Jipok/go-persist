@@ -123,27 +123,27 @@ Operations: 10,000,000 (across 150 goroutines)
 
 ===== Benchmarking: Structs =====
                      Elapsed           Throughput           Avg Latency
-go-persist Async     2115ms        4,728,017 ops/sec         211 ns/op, 22.4 MB
-sync.Map             2533ms        3,947,354 ops/sec         253 ns/op
-map+RWMutex          7797ms        1,282,525 ops/sec         779 ns/op
-go-persist Sync      9422ms        1,061,342 ops/sec         942 ns/op, 4.1 KB
-buntdb             117675ms           84,979 ops/sec       11767 ns/op, 47.9 MB
-bolt       NoSync   77085ms          129,726 ops/sec        7708 ns/op, 10.9 KB
+go-persist Async     2444ms        4,091,899 ops/sec         244 ns/op
+sync.Map             2770ms        3,610,659 ops/sec         276 ns/op
+map+RWMutex          7737ms        1,292,449 ops/sec         773 ns/op
+go-persist Sync      9241ms        1,082,091 ops/sec         924 ns/op
+buntdb              91150ms          109,709 ops/sec        9114 ns/op
+bolt       NoSync   99801ms          100,199 ops/sec        9980 ns/op
 
 ----- File sizes for Structs -----
-persist.db1: 72.71 MB
-buntdb.db1: 72.89 MB
-bolt.db1: 136.03 MB
+persist.db1: 64.51 MB
+buntdb.db1: 73.57 MB
+bolt.db1: 128.03 MB
 
 ===== Benchmarking: Strings =====
-go-persist Async     2271ms        4,403,253 ops/sec         227 ns/op, 93.9 MB
-sync.Map             2879ms        3,473,988 ops/sec         287 ns/op
-map+RWMutex          8095ms        1,235,359 ops/sec         809 ns/op
-go-persist Set       8914ms        1,121,794 ops/sec         891 ns/op, 65.9 MB
-buntdb              39398ms          253,819 ops/sec        3939 ns/op, 94.3 MB
-bolt       NoSync   72827ms          137,312 ops/sec        7282 ns/op, 22.4 KB
+go-persist Async     2488ms        4,018,695 ops/sec         248 ns/op
+sync.Map             2832ms        3,531,494 ops/sec         283 ns/op
+map+RWMutex          8011ms        1,248,234 ops/sec         801 ns/op
+go-persist Set       9088ms        1,100,399 ops/sec         908 ns/op
+buntdb              38765ms          257,962 ops/sec        3876 ns/op
+bolt       NoSync   88785ms          112,631 ops/sec        8878 ns/op
 
 ----- File sizes for Strings -----
-persist.db2: 226.63 MB
-test.buntdb: 130.60 MB
-bolt.db2: 152.04 MB
+persist.db2: 77.06 MB
+test.buntdb: 136.88 MB
+bolt.db2: 160.04 MB
