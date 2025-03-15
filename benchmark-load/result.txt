@@ -1,0 +1,17 @@
+Persist write time: 3.59s
+BoltDB  write time: 12.68s
+BuntDB  write time: 4.52s
+
+//////////////////////////
+
+Persist file size:  492  MB
+Persist raw load time: 0.92s
+Persist read time: 1.43s
+
+BoltDB  file size:  826  MB
+BoltDB  raw load time: 1.82s
+BoltDB  read time: 0.00s
+
+BuntDB  file size:  499  MB
+BuntDB  raw load time: 0.94s
+BuntDB  read time: 1.34s
