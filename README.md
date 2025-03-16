@@ -1,26 +1,41 @@
 # go-persist
 
-A high-performance, type-safe, persisted key-value store for Go, leveraging generics and WAL-based persistence.
+A high-performance, type-safe, persisted key-value store for Go that combines the speed of in-memory maps with the durability of persistent storage.
 
-## Motivation
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Jipok/go-persist.svg)](https://pkg.go.dev/github.com/Jipok/go-persist)
 
-At first glance, building yet another key-value store in Go might seem redundant. There are plenty of popular solutions already available — Bolt, BuntDB, Badger, Pebble, Bbolt and others, each with its particular strengths. However, my experience has consistently demonstrated a fundamental mismatch between what's readily available and what many Go applications actually need.
+## 🤔 Why Another Key-Value Store?
 
-Most existing databases approach persistence from a storage-first perspective: they store raw keys and values as byte sequences or strings, requiring the developer to manage data serialization and deserialization manually. While generic and flexible, this approach introduces noticeable overhead: your application code has to continuously marshal and unmarshal data to and from complex structures (commonly JSON), wasting CPU cycles and making code less clear and maintainable.
+At first glance, creating yet another embedded key-value database in Go seems redundant. Indeed, popular solutions like Bolt, BuntDB, Badger, or Pebble already exist, each having niche strengths. 
 
-To mitigate serialization overhead, developers often add a separate typed cache (like a `sync.Map` or a `map` guarded by mutexes) to their applications. However, this approach brings its own set of complexities:
+**However, existing solutions fall short for common Go application patterns**:
 
-- You now have two sources of truth, requiring careful synchronization to prevent stale data or race conditions.
-- Persistence logic becomes complicated, cluttering your business codebase.
-- Debugging and maintaining state across restarts becomes inherently more challenging.
+- **Manual Serialization Overhead**: Most existing databases represent values and keys as raw `[]byte` or `string`. To deal with structured data (e.g., Go structs), you repetitively marshal/unmarshal data (typically via JSON), incurring CPU and GC overhead and complicating your code.
 
-I created `go-persist` because I wanted a better way: a persistent store as simple to use as an ordinary Go map, yet powerful enough to offer type-safe, high-performance concurrent operations without additional caching layer.
+- **Performance vs Persistence Dilemma**: High-performance concurrent solutions (`sync.Map` or mutex-protected `map`) lack persistence. Persistent databases trade convenience for speed and require complex caching logic to accelerate operations.
 
-With the introduction of Generics in recent Go versions and the availability of advanced concurrent maps ([`xsync.Map`](https://github.com/puzpuzpuz/xsync?tab=readme-ov-file#map)), it became feasible to maintain type safety and near-native `sync.Map` performance without sacrificing persistence guarantees. Unlike traditional databases which serialize everything to strings or byte arrays, `go-persist` keeps data as native Go types in memory, automatically handling JSON serialization transparently only during persistence.
+- **Complexity of Custom Caching Layers**: 
+  - You often have two sources of truth (cache/in-memory and disk), making synchronization error-prone. 
+  - Application logic becomes polluted by persistence management. 
+  - State debugging and consistency across shutdowns/restarts requires significant effort.
 
-## Performance
+**Go-persist aims to deliver the exact sweet spot:**
+- 🚀 **Performance:** Near-native `sync.Map` performance for structured data.
+- 🛡 **Safety:** Native Go types with transparent persistence.
+- 🔋 **Convenience:** Simple, intuitive map-like APIs requiring no manual serialization.
+- ⚙️ **Flexibility:** Explicit control over persistence guarantees (async, immediate, fsync).
 
-*Benchmark: 1M struct operations over 150 goroutines, after 100k prefill*
+📖 [More details on design considerations and trade-offs](https://github.com/Jipok/go-persist?tab=readme-ov-file#-design-trade-offs)
+
+---
+
+## 🧪 Performance Benchmarks Summary
+
+*(Intel N100 Quad-Core @3.4GHz, Linux environment)*
+
+*1M struct operations (150 goroutines), 100K items dataset*
+
 | Solution           | Operations/sec | ns/op | File Size |
 |--------------------|----------------|-------|-----------|
 | go-persist `Async` | 7,117,079      | 140   | 6.07 MB   |
@@ -30,15 +45,18 @@ With the introduction of Generics in recent Go versions and the availability of 
 | buntdb             | 251,218        | 3980  | 11.15 MB  |
 | bolt       `NoSync`| 181,481        | 5510  | 24.00 MB  |
 
-Additional benchmarks and detailed results are [available in the repository](https://github.com/Jipok/go-persist/blob/master/benchmark/result.txt). Benchmarks were carried out on a modest system (Intel N100 with Void Linux). The results consistently show that go-persist is competitive with in-memory maps while providing persistent storage and maintaining a relatively small file size.
+Check detailed benchmarks and comparisons in the separate benchmark docs:
 
-## Installation
+- [Operation-Intensive Benchmark](https://github.com/Jipok/go-persist/tree/master/benchmark)
+- [Load (file loading, dataset scaling) Benchmark](https://github.com/Jipok/go-persist/tree/master/benchmark-load)
+
+## 📦 Installation
 
 ```bash
 go get github.com/Jipok/go-persist
 ```
 
-## Quick Start
+## 🚀 Quick Start Example
 
 ```go
 package main
@@ -102,72 +120,27 @@ func main() {
 }
 ```
 
-### Using Multiple Maps in One Store
+## 🛠️ API Examples
+
+<details><summary>Using Multiple Typed Maps Together</summary>
 
 ```go
-package main
+store := persist.New()
+defer store.Close()
 
-import (
-    "log"
-    "github.com/Jipok/go-persist"
-)
+users, _ := persist.Map[User](store, "users")
+products, _ := persist.Map[Product](store, "products")
+sessions, _ := persist.Map[Session](store, "sessions")
 
-type User struct {
-    Name  string
-    Age   int
-}
+store.Open("app.db")
 
-type Product struct {
-    Name  string
-    Price float64
-}
-
-type Session struct {
-    UserID     string
-    Expiration int64
-}
-
-func main() {
-    store := persist.New()
-    defer store.Close()
-
-    // Create typed maps for different entity types
-    users, err := persist.Map[User](store, "users")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    products, err := persist.Map[Product](store, "products")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    sessions, err := persist.Map[Session](store, "sessions")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Create or load store file
-    err = store.Open("app.db")
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Compact the store to reclaim space
-    if err := store.Shrink(); err != nil {
-        log.Fatal(err)
-    }
-
-    // Use each map independently
-    users.Set("u1", User{Name: "Admin", Age: 35})
-    products.Set("p1", Product{Name: "Widget", Price: 19.99})
-    sessions.SetAsync("sess123", Session{UserID: "u1", Expiration: 1718557123})
-}
+users.Set("user1", User{Name: "Alice", Age: 30})
+products.Set("product42", Product{Name: "Gadget", Price: 49.99})
+sessions.SetAsync("sess12345", Session{UserID: "user1", Expire: 1718557123})
 ```
+</details>
 
-## Detailed API Usage
-
-### PersistMap Methods
+<details><summary>PersistMap Methods</summary>
 
 ```go
 // Retrieve data
@@ -213,9 +186,9 @@ myMap.Range(func(key string, value ValueType) bool {
 myMap.Free()
 ```
 
-### Using the Basic Store API
+</details>
 
-For simple configuration or single-value storage:
+<details><summary>Using the Basic Store API</summary>
 
 ```go
 type Config struct {
@@ -254,29 +227,50 @@ func main() {
     }
 }
 ```
+</details>
 
-## Human-readable and writable `store.db` format
+<details><summary>WAL Management and Monitoring</summary>
 
-```bash
-go-persist 1                                          # Version header
-S key1                                                # Set operation for key1
-{"Name":"Alice","Age":30,"Email":"alice@example.com"} # Value
-S key2                                                # Set operation for key2
-"some plain string"                                   # Value
-D key1                                                # Delete operation for key1
-                                                      # Empty string for delete op
-S key2                                                # New version of key2
-"some another plain string"                           # Updated value
+```go
+// Force immediate durability of all data
+if err := store.FSyncAll(); err != nil {
+    log.Fatal("Failed to sync data to disk:", err)
+}
 
+// Get statistics about the store
+activeKeys, walRecords := store.Stats()
+fmt.Printf("Active keys: %d, WAL records: %d, Ratio: %.2f\n", 
+    activeKeys, walRecords, float64(walRecords)/float64(activeKeys))
+
+// Manually compact the WAL file to reclaim space
+if err := store.Shrink(); err != nil {
+    log.Fatal(err)
+}
+
+// Or set up automatic compaction when record count exceeds 2x the active keys
+store.StartAutoShrink(1*time.Minute, 2.0) // Check ratio every minute
 ```
+</details>
 
-- `S key` - Set operation
-- `D key` - Delete operation
-- **Values**: Stored as standard JSON on the line after the operation
 
-## Durability Levels
+---
 
-go-persist offers multiple durability options to balance performance and data safety:
+### 🚩 Performance Control
+
+`go-persist` lets you choose your performance and durability trade-off explicitly:
+
+
+| Method                         | Performance | Persistence Guarantee               |
+|--------------------------------|-------------|-------------------------------------|
+| `.SetAsync()` | Highest 🚀        | Background persistence (potential loss on app crash)|
+| `.Set()`           | Balanced      | Immediate WAL (application failure safe, OS failure risk)|
+| `.SetFSync()` | Lowest 🔐         | Immediate WAL+fsync (fully durable, failure-proof)|
+
+<details><summary>📚 Details</summary>
+
+---
+
+### Durability Levels
 
 1. **Async Methods** (`SetAsync`, `DeleteAsync`, `UpdateAsync`): Highest performance with deferred persistence.
    - Updates are applied in-memory immediately
@@ -292,7 +286,7 @@ go-persist offers multiple durability options to balance performance and data sa
    - Updates are written to WAL and flushed to physical disk with fsync
    - Safe against both application and system crashes
    - Use when data integrity is critical
-   - See [Design Trade-offs](https://github.com/Jipok/go-persist#design-trade-offs)
+   - See [Design Trade-offs](https://github.com/Jipok/go-persist?tab=readme-ov-file#-design-trade-offs)
 
 ### Configuring Sync Interval
 
@@ -324,24 +318,42 @@ For the `Set` method, even with a very long sync interval, changes are initially
 * The parameter `/proc/sys/vm/dirty_writeback_centisecs` is typically set to 500 (≈5 seconds), meaning the kernel scans for dirty pages and may flush them every ~5 seconds.
 * The parameter `/proc/sys/vm/dirty_expire_centisecs` is usually around 3000 (≈30 seconds), so pages older than ~30 seconds are forced to be written to disk.
 
-## Design Considerations and Trade-offs
+---
+</details>
 
-go-persist is designed with specific goals in mind: simplicity(<1000 lines), type safety, and performance for embedded use cases. Understanding the following considerations will help you determine if it's the right fit for your needs:
+## 📋 Human-readable and writable WAL format
 
-### Intended Use Cases
-- **Configuration storage**: Store application settings with typed access
-- **Local caches with persistence**: Keep type-safe data across application restarts
-- **Lightweight structured data storage**: For applications where a full database is overkill
-- **High-throughput workloads**: With Async mode, can handle extremely high write volumes when immediate durability isn't critical
-- **Development and prototyping**: Quick setup with minimal configuration
-- **Small to medium data volumes**: Ideally under a few GB of data
+```bash
+go-persist 1                                          # Version header
+S key1                                                # Set operation for key1
+{"Name":"Alice","Age":30,"Email":"alice@example.com"} # Value
+S key2                                                # Set operation for key2
+"some plain string"                                   # Value
+D key1                                                # Delete operation for key1
+                                                      # Empty string for delete op
+S key2                                                # New version of key2
+"some another plain string"                           # Updated value
 
-### Design Trade-offs
+```
+
+- `S`: Set an operation with a valid JSON payload
+- `D`: Delete the key
+- Easy to inspect and debug without special tools
+
+
+## 📌 Intended Use Cases
+
+- Development and rapid prototyping: simple setup without boilerplate.
+- Configuration storage: typed data, effortlessly saved to disk.
+- Local persistent caching layer: structured data requiring fast, concurrent access.
+- Applications with moderate data volume (up to a few GB of RAM).
+
+## 🚧 Design Trade-offs
 
 **Human-Readable Format vs Checksums**
 - The WAL format prioritizes human readability and debuggability
 - No built-in checksums or CRCs to validate file integrity
-- If you need stronger corruption detection, consider using this on a filesystem with checksumming (like ZFS, btrfs) or RAID
+- If you need stronger corruption detection, consider using this on a filesystem with checksumming (like ZFS, btrfs) and RAID
 - Can detect incomplete format entries from crashes but can't detect bitrot or partial corruption within a syntactically valid entry
 
 **Memory-First Approach**
@@ -350,7 +362,7 @@ go-persist is designed with specific goals in mind: simplicity(<1000 lines), typ
 - Provides map-like access patterns rather than database query capabilities
 
 ### Performance and Scale Considerations
-- Tested with datasets up to ~500MB of real data
+- Tested with datasets up to ~1GB of real data
 - WAL file grows unbounded until `Shrink()` is called
 - No complex recovery mechanisms, distributed capabilities, or transaction isolation
 - Memory usage scales linearly with dataset size, with reasonable overhead compared to raw data
