@@ -25,7 +25,6 @@ const WalHeader = "go-persist 1"
 const DefaultSyncInterval = time.Second
 
 var (
-	// ErrKeyNotFound is returned when the key is not found in the storage
 	ErrKeyNotFound      = errors.New("key not found")
 	ErrNotLoaded        = errors.New("store is not loaded")
 	ErrShrinkInProgress = errors.New("shrink operation is already in progress")
@@ -198,6 +197,7 @@ func (s *Store) processRecords() error {
 	recordsChan := make(chan recordData, 100)
 
 	// Start a goroutine for reading the records concurrently
+	var outErr error
 	go func() {
 		defer close(recordsChan)
 		for {
@@ -206,7 +206,7 @@ func (s *Store) processRecords() error {
 				if err == io.EOF {
 					break
 				}
-				log.Println("go-persist: error reading record:", err)
+				outErr = errors.New("error reading record: " + err.Error())
 				break
 			}
 			s.totalWALRecords.Add(1)
@@ -226,7 +226,7 @@ func (s *Store) processRecords() error {
 			// Registered map found - process the record via its interface
 			pm, _ := mapVal.(persistMapI)
 			if err := pm.processRecord(rec.op, rec.fullKey[idx+1:], rec.valueStr); err != nil {
-				log.Println("go-persist: failed processing record for key", rec.fullKey, "error:", err)
+				return errors.New("go-persist: failed processing record for key `" + rec.fullKey + "`:" + err.Error())
 			}
 		} else {
 			// No matching map – save the raw record as a string in orphanRecords
@@ -237,6 +237,10 @@ func (s *Store) processRecords() error {
 				s.orphanRecords.Delete(rec.fullKey)
 			}
 		}
+	}
+
+	if outErr != nil {
+		return outErr
 	}
 
 	return nil
@@ -254,7 +258,6 @@ func (s *Store) Close() error {
 	// Stop auto-shrink if enabled
 	if s.stopAutoShrink != nil {
 		close(s.stopAutoShrink)
-		s.stopAutoShrink = nil
 	}
 
 	// Signal background FSyncAll to stop and wait for it to finish
@@ -481,17 +484,22 @@ func (s *Store) Shrink() error {
 	defer s.wg.Done()
 	s.mu.Unlock()
 
+	stopShrinking := func() {
+		s.mu.Lock()
+		s.shrinking = false
+		s.mu.Unlock()
+	}
+
 	// Create temporary file for the compacted WAL
 	tmpPath := s.path + ".tmp"
 	tmpFile, err := os.Create(tmpPath)
 	if err != nil {
-		s.shrinking = false
 		return err
 	}
 
 	// Write the WAL header
 	if _, err := tmpFile.WriteString(WalHeader + "\n"); err != nil {
-		s.shrinking = false
+		stopShrinking()
 		return err
 	}
 
@@ -527,7 +535,7 @@ func (s *Store) Shrink() error {
 		return true
 	})
 	if outErr != nil {
-		s.shrinking = false
+		stopShrinking()
 		return outErr
 	}
 
@@ -544,13 +552,13 @@ func (s *Store) Shrink() error {
 		return true
 	})
 	if outErr != nil {
-		s.shrinking = false
+		stopShrinking()
 		return outErr
 	}
 
 	// Sync file to disk before obtaining lock to minimize lock duration
 	if err := tmpFile.Sync(); err != nil {
-		s.shrinking = false
+		stopShrinking()
 		return err
 	}
 
@@ -571,13 +579,13 @@ func (s *Store) Shrink() error {
 		// Write the locally copied pending records outside the lock
 		for _, rec := range localPending {
 			if _, err := tmpFile.WriteString(rec); err != nil {
-				s.shrinking = false
+				stopShrinking()
 				return err
 			}
 			recordCounter++
 		}
 		if err := tmpFile.Sync(); err != nil {
-			s.shrinking = false
+			stopShrinking()
 			return err
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -365,27 +366,32 @@ func TestStore_InvalidRecordMidFile(t *testing.T) {
 	// Open the store
 	store := New()
 	err = store.Open(path)
-	if err != nil {
-		t.Fatalf("failed to open store: %v", err)
+	if !strings.Contains(err.Error(), "invalid record header format") {
+		t.Fatalf("expected: invalid record header format. Got:  %v", err)
 	}
 	defer store.Close()
 
-	// Attempt to retrieve key "first" which was written before the invalid record.
-	// Expect to get the value 100.
-	firstVal, err := Get[int](store, "first")
-	if err != nil {
-		t.Errorf("failed to get key 'first': %v", err)
-	}
-	if firstVal != 100 {
-		t.Errorf("expected key 'first' to have value 100, got %d", firstVal)
+	_, err = Get[int](store, "first")
+	if !strings.Contains(err.Error(), "store is not loaded") {
+		t.Fatalf("expected: store is not loaded. Got:  %v", err)
 	}
 
-	// Attempt to retrieve key "second" which was written after the invalid record.
-	// Since the invalid record stops further processing, key "second" should not be found.
-	secondVal, err := Get[int](store, "second")
-	if err == nil {
-		t.Errorf("expected error for key 'second' due to invalid record mid file, got value %d", secondVal)
-	} else if !errors.Is(err, ErrKeyNotFound) {
-		t.Errorf("expected ErrKeyNotFound for key 'second', got: %v", err)
-	}
+	// // Attempt to retrieve key "first" which was written before the invalid record.
+	// // Expect to get the value 100.
+	// firstVal, err := Get[int](store, "first")
+	// if err != nil {
+	// 	t.Errorf("failed to get key 'first': %v", err)
+	// }
+	// if firstVal != 100 {
+	// 	t.Errorf("expected key 'first' to have value 100, got %d", firstVal)
+	// }
+
+	// // Attempt to retrieve key "second" which was written after the invalid record.
+	// // Since the invalid record stops further processing, key "second" should not be found.
+	// secondVal, err := Get[int](store, "second")
+	// if err == nil {
+	// 	t.Errorf("expected error for key 'second' due to invalid record mid file, got value %d", secondVal)
+	// } else if !errors.Is(err, ErrKeyNotFound) {
+	// 	t.Errorf("expected ErrKeyNotFound for key 'second', got: %v", err)
+	// }
 }

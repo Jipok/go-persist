@@ -5,7 +5,7 @@ go 1.24.1
 replace github.com/Jipok/go-persist => ../
 
 require (
-	github.com/Jipok/go-persist v1.7.0
+	github.com/Jipok/go-persist v1.8.0
 	github.com/goccy/go-json v0.10.5
 	github.com/tidwall/buntdb v1.3.2
 	go.etcd.io/bbolt v1.4.0
