@@ -26,25 +26,28 @@ const DefaultSyncInterval = time.Second
 
 var (
 	// ErrKeyNotFound is returned when the key is not found in the storage
-	ErrKeyNotFound = errors.New("key not found")
-	ErrNotLoaded   = errors.New("store is not loaded")
+	ErrKeyNotFound      = errors.New("key not found")
+	ErrNotLoaded        = errors.New("store is not loaded")
+	ErrShrinkInProgress = errors.New("shrink operation is already in progress")
 )
 
 // Store represents the WAL(write-ahead log) storage
 type Store struct {
-	mu             sync.Mutex     // protects concurrent access to the file
-	f              *os.File       // file descriptor for append operations
-	path           string         // file path used for reopening during reads
-	stopSync       chan struct{}  // channel to signal background sync to stop
-	wg             sync.WaitGroup // waitgroup for background sync goroutine and shrink
-	persistMaps    *xsync.Map     // registry of PersistMap instances
-	closedMaps     *xsync.Map     // list of map with was Close()
-	orphanRecords  *xsync.Map     // stores records that do not belong to any registered map
-	syncInterval   atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
-	shrinking      bool           // flag to indicate that a shrink operation is in progress
-	pendingRecords []string       // buffer for pending WAL records during shrink (each record already contains header+value+'\n')
-	loaded         bool
-	ErrorHandler   func(err error)
+	mu              sync.Mutex     // protects concurrent access to the file
+	f               *os.File       // file descriptor for append operations
+	path            string         // file path used for reopening during reads
+	stopSync        chan struct{}  // channel to signal background sync to stop
+	wg              sync.WaitGroup // waitgroup for background sync goroutine and shrink
+	persistMaps     *xsync.Map     // registry of PersistMap instances
+	closedMaps      *xsync.Map     // list of map with was Close()
+	orphanRecords   *xsync.Map     // stores records that do not belong to any registered map
+	syncInterval    atomic.Int64   // sync and flush interval background f.Sync() (representing a time.Duration)
+	shrinking       bool           // flag to indicate that a shrink operation is in progress
+	pendingRecords  []string       // buffer for pending WAL records during shrink (each record already contains header+value+'\n')
+	stopAutoShrink  chan struct{}  // channel to signal auto-shrink goroutine to stop
+	totalWALRecords atomic.Int32
+	loaded          bool
+	ErrorHandler    func(err error)
 }
 
 // New creates and initializes a new Store instance.
@@ -206,6 +209,7 @@ func (s *Store) processRecords() error {
 				log.Println("go-persist: error reading record:", err)
 				break
 			}
+			s.totalWALRecords.Add(1)
 			recordsChan <- recordData{op: op, fullKey: fullKey, valueStr: valueStr}
 		}
 	}()
@@ -245,6 +249,12 @@ func (s *Store) processRecords() error {
 func (s *Store) Close() error {
 	if !s.loaded {
 		return ErrNotLoaded
+	}
+
+	// Stop auto-shrink if enabled
+	if s.stopAutoShrink != nil {
+		close(s.stopAutoShrink)
+		s.stopAutoShrink = nil
 	}
 
 	// Signal background FSyncAll to stop and wait for it to finish
@@ -313,6 +323,7 @@ func (s *Store) write(key string, value interface{}) error {
 	if _, err = s.f.Write([]byte(header + line)); err != nil {
 		return err
 	}
+	s.totalWALRecords.Add(1)
 
 	// If shrinking is in progress, also append the record into pendingRecords
 	if s.shrinking {
@@ -343,6 +354,7 @@ func (s *Store) Delete(key string) error {
 	if _, err := s.f.Write([]byte(header + line)); err != nil {
 		return err
 	}
+	s.totalWALRecords.Add(1)
 
 	// If a shrink is in progress, also record the delete operation in the pending buffer
 	if s.shrinking {
@@ -461,11 +473,8 @@ func (s *Store) Shrink() error {
 	s.mu.Lock()
 	if s.shrinking {
 		s.mu.Unlock()
-		return errors.New("shrink operation is already in progress")
+		return ErrShrinkInProgress
 	}
-	defer func() {
-		s.shrinking = false
-	}()
 	s.shrinking = true
 	s.pendingRecords = nil
 	s.wg.Add(1)
@@ -476,13 +485,17 @@ func (s *Store) Shrink() error {
 	tmpPath := s.path + ".tmp"
 	tmpFile, err := os.Create(tmpPath)
 	if err != nil {
+		s.shrinking = false
 		return err
 	}
 
 	// Write the WAL header
 	if _, err := tmpFile.WriteString(WalHeader + "\n"); err != nil {
+		s.shrinking = false
 		return err
 	}
+
+	var recordCounter int32 = 0
 
 	// Iterate over orphanRecords and write each record to the temporary file
 	var outErr error
@@ -510,28 +523,34 @@ func (s *Store) Shrink() error {
 			outErr = err
 			return false
 		}
+		recordCounter++
 		return true
 	})
 	if outErr != nil {
+		s.shrinking = false
 		return outErr
 	}
 
 	// Write persistMap states
 	s.persistMaps.Range(func(mapName string, pmInterface interface{}) bool {
 		if pm, ok := pmInterface.(persistMapI); ok {
-			if err := pm.writeRecords(tmpFile); err != nil {
+			pmCounter, err := pm.writeRecords(tmpFile)
+			if err != nil {
 				outErr = err
 				return false
 			}
+			recordCounter += pmCounter
 		}
 		return true
 	})
 	if outErr != nil {
+		s.shrinking = false
 		return outErr
 	}
 
 	// Sync file to disk before obtaining lock to minimize lock duration
 	if err := tmpFile.Sync(); err != nil {
+		s.shrinking = false
 		return err
 	}
 
@@ -552,22 +571,27 @@ func (s *Store) Shrink() error {
 		// Write the locally copied pending records outside the lock
 		for _, rec := range localPending {
 			if _, err := tmpFile.WriteString(rec); err != nil {
+				s.shrinking = false
 				return err
 			}
+			recordCounter++
 		}
 		if err := tmpFile.Sync(); err != nil {
+			s.shrinking = false
 			return err
 		}
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.shrinking = false
 
 	// Process any remaining pendingRecords under final lock to ensure all operations are captured before file swap
 	for _, rec := range s.pendingRecords {
 		if _, err := tmpFile.WriteString(rec); err != nil {
 			return err
 		}
+		recordCounter++
 	}
 	s.pendingRecords = nil
 
@@ -593,6 +617,7 @@ func (s *Store) Shrink() error {
 		return err
 	}
 	s.f = newFile
+	s.totalWALRecords.Store(recordCounter)
 
 	return nil
 }
@@ -634,6 +659,90 @@ func ValidateKey(key string) error {
 		// Advance by the size of the decoded rune
 		i += size - 1
 	}
+
+	return nil
+}
+
+// Stats returns statistics about the store state.
+//
+// Returns:
+//   - activeKeys: The total number of currently active (non-deleted) keys across
+//     all registered maps and orphan records. This represents the actual data items
+//     currently stored.
+//   - walRecords: The total number of records written to the WAL file since opening,
+//     including both set and delete operations. This can be significantly higher
+//     than activeKeys due to updates and deletions.
+//
+// This method can be useful for monitoring storage growth and determining
+// when a Shrink() operation might be beneficial (when walRecords is much
+// larger than activeKeys).
+func (s *Store) Stats() (activeKeys int32, walRecords int32) {
+	var count int32
+
+	// Count orphan records
+	s.orphanRecords.Range(func(key string, value interface{}) bool {
+		count++
+		return true
+	})
+
+	// Count keys in each persistMap
+	s.persistMaps.Range(func(mapName string, pmInterface interface{}) bool {
+		// Here we assume that each persistMap exposes a Size() method.
+		// Since persistMapI doesn't include Size(), we have to type assert to our concrete type.
+		if pm, ok := pmInterface.(interface{ Size() int }); ok {
+			count += int32(pm.Size())
+		}
+		return true
+	})
+	return count, s.totalWALRecords.Load()
+}
+
+// StartAutoShrink initiates a background goroutine that automatically compacts the WAL file
+// at regular intervals when certain conditions are met.
+//
+// Parameters:
+//   - checkInterval: How frequently to check if compaction is needed
+//   - shrinkRatio: The threshold ratio of (WAL records)/(active keys) that triggers shrinking
+func (s *Store) StartAutoShrink(checkInterval time.Duration, shrinkRatio float64) error {
+	if !s.loaded {
+		return ErrNotLoaded
+	}
+	if s.stopAutoShrink != nil {
+		return errors.New("AutoShrink goroutine is already working")
+	}
+
+	s.stopAutoShrink = make(chan struct{})
+	s.wg.Add(1)
+
+	go func() {
+		defer s.wg.Done()
+
+		ticker := time.NewTicker(checkInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				activeKeys, walRecords := s.Stats()
+				if activeKeys > 0 {
+					ratio := float64(walRecords) / float64(activeKeys)
+					if ratio >= shrinkRatio {
+						err := s.Shrink()
+						if err != nil && err != ErrShrinkInProgress {
+							s.ErrorHandler(errors.New("AutoShrink: " + err.Error()))
+						}
+					}
+				} else if walRecords > 0 {
+					// If there are records but no effective keys, perform shrink
+					err := s.Shrink()
+					if err != nil && err != ErrShrinkInProgress {
+						s.ErrorHandler(errors.New("AutoShrink: " + err.Error()))
+					}
+				}
+			case <-s.stopAutoShrink:
+				return
+			}
+		}
+	}()
 
 	return nil
 }

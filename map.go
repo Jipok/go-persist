@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/puzpuzpuz/xsync/v3"
@@ -14,7 +15,7 @@ import (
 // persistMapI defines the common interface during bulk loading and Shrink()
 type persistMapI interface {
 	processRecord(op, fullKey, valueLine string) error
-	writeRecords(w io.Writer) error
+	writeRecords(w io.Writer) (int32, error)
 }
 
 type PersistMap[T any] struct {
@@ -49,11 +50,8 @@ func OpenSingleMap[T any](path string) (*PersistMap[T], error) {
 		return nil, err
 	}
 
-	// Optimize storage by compacting the WAL file
-	if err := store.Shrink(); err != nil {
-		store.Close()
-		return nil, err
-	}
+	// Periodically optimize storage
+	store.StartAutoShrink(time.Minute, 1.8)
 
 	return pm, nil
 }
@@ -166,29 +164,32 @@ func (pm *PersistMap[T]) processRecord(op, key, value string) error {
 // writeRecords writes all the in-memory records of the PersistMap to the provided writer.
 // Each record is written as a "set" record in the WAL format.
 // Need for Shrink()
-func (pm *PersistMap[T]) writeRecords(w io.Writer) error {
+func (pm *PersistMap[T]) writeRecords(w io.Writer) (int32, error) {
 	var err error
+	var counter int32 = 0
 	pm.data.Range(func(key string, value interface{}) bool {
 		data, e := json.Marshal(value)
 		if e != nil {
 			err = e
 			return false
 		}
-		// Full key is composed of pm.prefix (e.g. "mapName:") plus the key
-		fullKey := pm.prefix + key
-		// Write "S" (set) record: first line contains the operation and the key
-		if _, e = w.Write([]byte("S " + fullKey + "\n")); e != nil {
+		// The record format consists of two lines:
+		// 1. S <key>
+		// 2. <json-serialized-value>
+		// The newline after the value serves as a marker that the record was
+		// successfully written and can be safely processed during recovery.
+		//
+		// Full key is composed of pm.prefix "mapName:" plus the key
+		header := "S " + pm.prefix + key + "\n"
+		line := string(data) + "\n"
+		if _, e = w.Write([]byte(header + line)); e != nil {
 			err = e
 			return false
 		}
-		// Second line contains the JSON-encoded value
-		if _, e = w.Write([]byte(string(data) + "\n")); e != nil {
-			err = e
-			return false
-		}
+		counter++
 		return true
 	})
-	return err
+	return counter, err
 }
 
 // Get retrieves the value associated with the key from the in-memory map.
