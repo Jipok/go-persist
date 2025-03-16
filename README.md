@@ -125,18 +125,52 @@ func main() {
 <details><summary>Using Multiple Typed Maps Together</summary>
 
 ```go
-store := persist.New()
-defer store.Close()
+package main
 
-users, _ := persist.Map[User](store, "users")
-products, _ := persist.Map[Product](store, "products")
-sessions, _ := persist.Map[Session](store, "sessions")
+import (
+    "log"
+    "time"
+    "github.com/Jipok/go-persist"
+)
 
-store.Open("app.db")
+type User struct {
+    Name  string
+    Age   int
+}
 
-users.Set("user1", User{Name: "Alice", Age: 30})
-products.Set("product42", Product{Name: "Gadget", Price: 49.99})
-sessions.SetAsync("sess12345", Session{UserID: "user1", Expire: 1718557123})
+type Product struct {
+    Name  string
+    Price float64
+}
+
+type Session struct {
+    UserID     string
+    Expiration int64
+}
+
+func main() {
+    store := persist.New()
+    defer store.Close()
+
+    // Create typed maps for different entity types
+    users, _ := persist.Map[User](store, "users")
+    products, _ := persist.Map[Product](store, "products")
+    sessions, _ := persist.Map[Session](store, "sessions")
+
+    // Create or load store file
+    err := store.Open("app.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Set up automatic compaction
+    store.StartAutoShrink(time.Minute, 1.8)
+
+    // Use each map independently
+    users.Set("u1", User{Name: "Admin", Age: 35})
+    products.Set("p1", Product{Name: "Widget", Price: 19.99})
+    sessions.SetAsync("sess123", Session{UserID: "u1", Expiration: 1718557123})
+}
 ```
 </details>
 
