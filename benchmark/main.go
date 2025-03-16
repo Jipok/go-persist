@@ -133,8 +133,10 @@ func benchmarkPersistStructsSync() {
 	// --- Benchmark phase: synchronous ---
 	fmt.Print("go-persist Sync   ")
 	Ops(benchOps, goroutines, func(i, thread int) {
-		// if i == 10000 {
-		// 	go persistStructMap.Store.Shrink()
+		// if i%10000 == 0 {
+		// ef, total := persistStructMap.Store.Stats()
+		// println(ef, total)
+		// go persistStructMap.Store.Shrink()
 		// }
 		key := strconv.Itoa(rand.Intn(prePopCount))
 		if rand.Intn(100) < writePerc {

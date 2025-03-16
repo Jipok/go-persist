@@ -1,0 +1,84 @@
+numEntries = 81920
+
+Persist write time: 3.59s
+BoltDB  write time: 12.68s
+BuntDB  write time: 4.52s
+
+Persist file size:  492  MB
+Persist raw load time: 0.92s
+Persist one read time: 1.68s
+Persist one mem usage: 605.3 MB
+Persist 40k read time: 1.77s
+Persist 40k mem usage: 607.2 MB
+
+BoltDB file size:  826  MB
+BoltDB raw load time: 1.53s
+BoltDB one read time: 0.01s
+BoltDB one mem usage: 5.5 KB
+BoltDB 40k read time: 3.25s
+BoltDB 40k mem usage: 1.9 MB
+
+BuntDB file size:  499  MB
+BuntDB raw load time: 0.94s
+BuntDB one read time: 1.59s
+BuntDB one mem usage: 536.9 MB
+BuntDB 40k read time: 1.67s
+BuntDB 40k mem usage: 597.5 MB
+```
+
+```
+numEntries = 81920 * 2
+
+Persist write time: 7.67s
+BoltDB  write time: 267.52s
+BuntDB  write time: 7.84s
+
+Persist file size:  985  MB
+Persist raw load time: 1.84s
+Persist one read time: 3.47s
+Persist one mem usage: 1.2 GB
+Persist 40k read time: 3.58s
+Persist 40k mem usage: 1.2 GB
+
+BoltDB file size:  1636  MB
+BoltDB raw load time: 3.62s
+BoltDB one read time: 0.01s
+BoltDB one mem usage: 5.4 KB
+BoltDB 40k read time: 3.82s
+BoltDB 40k mem usage: 2.4 MB
+
+BuntDB file size:  1000  MB
+BuntDB raw load time: 1.96s
+BuntDB one read time: 3.50s
+BuntDB one mem usage: 1.0 GB
+BuntDB 40k read time: 3.79s
+BuntDB 40k mem usage: 1.1 GB
+```
+
+```
+numEntries = 81920 / 2
+
+Persist write time: 1.80s
+BoltDB  write time: 6.33s
+BuntDB  write time: 1.87s
+
+Persist file size:  246  MB
+Persist raw load time: 0.47s
+Persist one read time: 0.80s
+Persist one mem usage: 302.7 MB
+Persist 40k read time: 0.85s
+Persist 40k mem usage: 304.7 MB
+
+BoltDB file size:  420  MB
+BoltDB raw load time: 0.92s
+BoltDB one read time: 0.00s
+BoltDB one mem usage: 5.2 KB
+BoltDB 40k read time: 2.95s
+BoltDB 40k mem usage: 3.1 MB
+
+BuntDB file size:  249  MB
+BuntDB raw load time: 0.56s
+BuntDB one read time: 0.66s
+BuntDB one mem usage: 268.4 MB
+BuntDB 40k read time: 0.88s
+BuntDB 40k mem usage: 329.1 MB

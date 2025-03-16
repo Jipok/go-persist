@@ -1,62 +1,93 @@
+# Load Performance Benchmark Results
+
+This benchmark focuses on load time and scaling characteristics across different dataset sizes for three embedded Go key-value systems.
+
+The measurements include file loading, initialization costs, and subsequent operations to evaluate how each solution handles increasingly larger datasets. Pure operational performance is covered in a [other benchmark](https://github.com/Jipok/go-persist/tree/master/benchmark).
+
 ## Dataset Details
 
-The benchmark uses a consistent dataset across all three database systems:
+- **Structure**: Each record (`ComplexRecord`) includes multiple string fields, nested metadata, and a fixed 1KB data payload.
+- **Key size**: 9–13 bytes.
+- **Average record size**: 1228 ± 4 bytes.
+- **Collections**: 5 separate collections ("maps") per database.
 
-- **Record Structure**: Each record is a `ComplexRecord` containing multiple fields:
-  - String identifiers (ID, Name, Description)
-  - A fixed 1KB (1024 byte) data payload
-  - Nested metadata with timestamps and tags
+**Dataset sizes tested**:
 
-- **Dataset Size**:
-  - 81,920 records per map/collection
-  - 5 separate maps/collections in each database
-  - Total of 409,600 records (~410K records)
+| Size   | Records per Collection | Total Records |
+|--------|------------------------|---------------|
+| Small  | 40,960                 | ~205K         |
+| Medium | 81,920                 | ~410K         |
+| Large  | 163,840                | ~820K         |
 
-- **Test Operations**:
-  - Raw file loading into memory (without parsing)
-  - Single record lookup (`map-3-key-60000`)
-  - Batch lookup of 40,000 sequential records in `map-3`
+## Performance Results
 
-## Benchmark Result
+### ⚡ Write Performance
 
-```
-Persist write time: 3.59s
-BoltDB  write time: 12.68s
-BuntDB  write time: 4.52s
+| Solution | Small | Medium | Large | Scalability |
+|----------|-------|--------|-------|-------------|
+| **Persist**  | **1.80s** | **3.59s**  | **7.67s** | Linear      |
+| BoltDB   | 6.33s | 12.68s | 267.52s | Exponential |
+| BuntDB   | 1.87s | 4.52s  | 7.84s | Linear      |
 
-Persist file size:  492  MB
-Persist raw load time: 0.92s
-Persist one read time: 1.68s
-Persist one mem usage: 605.3 MB
-Persist 40k read time: 1.77s
-Persist 40k mem usage: 607.2 MB
+go-persist consistently achieves the fastest write performance across all dataset sizes, demonstrating linear scalability. In contrast, BoltDB experiences exponential performance degradation as dataset size increases.
 
-BoltDB file size:  826  MB
-BoltDB raw load time: 1.53s
-BoltDB one read time: 0.01s
-BoltDB one mem usage: 5.5 KB
-BoltDB 40k read time: 3.25s
-BoltDB 40k mem usage: 1.9 MB
+### 🔎 Single Record Lookup ("map-3-key-40000")
 
-BuntDB file size:  499  MB
-BuntDB raw load time: 0.94s
-BuntDB one read time: 1.59s
-BuntDB one mem usage: 536.9 MB
-BuntDB 40k read time: 1.67s
-BuntDB 40k mem usage: 597.5 MB
-```
+| Solution | Small | Medium | Large | Notes                        |
+|----------|-------|--------|-------|------------------------------|
+| Persist  | 0.80s | 1.68s  | 3.47s | Includes initial load time   |
+| BoltDB   | 0.00s | 0.01s  | 0.01s | Direct disk access (no load) |
+| BuntDB   | 0.66s | 1.59s  | 3.50s | Includes initial load time   |
 
-## Performance Trade-offs Explained
+BoltDB provides instant reads directly from disk without any upfront loading. Persist and BuntDB, designed for repeated efficient access, load data into memory initially, incurring a one-time startup cost.
 
-**Write Performance**: go-persist writes data significantly faster than BoltDB (3.5x) and slightly faster than BuntDB, thanks to its simplified WAL structure.
+### 📚 Batch Read (40K sequential records)
 
-**Memory-First vs Storage-First**: The benchmarks clearly show the "load once, use many times" philosophy of go-persist:
-- **Initial load cost**: go-persist pays the deserialization cost upfront (loading and parsing all structures during initialization) which results in higher initial memory usage but faster subsequent access.
-- **BoltDB** follows a pure storage-first approach with near-zero memory footprint (just 5.5KB after a single read) but requires deserialization for each read operation, making it slower for repeated access patterns (3.25s vs 1.77s for 40k reads).
-- **BuntDB** uses a hybrid approach similar to go-persist, explaining their similar memory profiles.
+| Solution | Small | Medium | Large |
+|----------|-------|--------|-------|
+| Persist  | **0.85s** | 1.77s  | **3.58s** |
+| BoltDB   | 2.95s | 3.25s  | 3.82s |
+| BuntDB   | 0.88s | **1.67s**  | 3.79s |
 
-**Ready-to-use data structures**: After the initial load, go-persist provides immediate access to fully parsed Go structs without additional deserialization overhead. The small difference between one read (1.68s) and 40k reads (1.77s) demonstrates this advantage - subsequent reads are nearly free.
+go-persist stands out with excellent speed in batch reads across dataset sizes. Once loaded, go-persist's data structures provide near-instant repeated access, clearly outperforming BoltDB's disk-based lookups.
 
-**Storage efficiency**: Despite keeping all data pre-parsed in memory, go-persist achieves excellent storage efficiency (492MB file size vs BoltDB's 826MB), showing the effectiveness of its simple WAL format.
+### 💾 Storage Efficiency
+
+| Solution | Small | Medium | Large |
+|----------|-------|--------|-------|
+| Persist  | 246 MB| 492 MB | 985 MB |
+| BoltDB   | 420 MB| 826 MB |1636 MB |
+| BuntDB   | 249 MB| 499 MB |1000 MB |
+
+Despite go-persist’s focus on speedy in-memory access, it achieves storage efficiency comparable with BuntDB and significantly better (~40%) than BoltDB.
+
+### 📈 Memory Usage After Initial Load (single query)
+
+| Solution | Small | Medium | Large |
+|----------|---------------|----------------|---------------|
+| Persist  | 302.7 MB      | 605.3 MB       | 1.2 GB        |
+| BoltDB   | **5.2 KB**    | **5.5 KB**     | **5.4 KB**    |
+| BuntDB   | 268.4 MB      | 536.9 MB       | 1.0 GB        |
+
+BoltDB maintains negligible RAM usage due to its disk-based approach. Persist (and similarly BuntDB) use significant memory upfront to enable ultra-low-latency repeated access thereafter.
+
+## Choosing the Right Solution
+
+### 🏅 go-persist
+- **Best-in-class write performance** at all scales tested
+- Exceptional repeated access performance after initial load
+- Native Go struct support eliminates repeated parsing overhead
+- Strong storage efficiency despite in-memory design
+- Predictable linear scalability for stable performance characteristics
+
+### BoltDB
+- Minimal memory usage—ideal when RAM is limited
+- Instant direct-from-disk read performance per individual query
+- Best for applications that involve infrequent lookups or datasets larger than available memory
+
+### BuntDB
+- Balanced hybrid design (memory/disk)
+- Performs well under varied workloads
+- Supports transactions without excessive overhead  
 
 ### Overall, Persist trades higher memory consumption and slower individual load+read times for the benefits of immediate, type-safe in-memory access and faster write throughput.

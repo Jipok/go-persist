@@ -16,6 +16,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// Number of entries per map
+const numEntries = 819202
+
 // Complex metadata for a record.
 type Meta struct {
 	CreatedAt int64    // record creation timestamp
@@ -135,11 +138,6 @@ func runPersist() {
 			log.Fatal(err)
 		}
 
-		// Number of entries per map.
-		// With a fixed payload of 1024 bytes per record,
-		// 81920 entries will generate roughly 80 MB per map.
-		numEntries := 81920
-
 		// Create a fixed payload of 1024 bytes using the character 'x'
 		dataPayloadBytes := make([]byte, 1024)
 		for i := range dataPayloadBytes {
@@ -199,11 +197,11 @@ func runPersist() {
 		}
 		runtime.GC()
 
-		r, ok := maps[2].Get("key-60000")
+		r, ok := maps[2].Get("key-40000")
 		if !ok {
 			log.Fatal("key not found")
 		}
-		if r.ID != "complex_map3-60000" {
+		if r.ID != "complex_map3-40000" {
 			log.Fatal("Wrong value: ", r.ID)
 		}
 	})
@@ -259,7 +257,6 @@ func runBoltDB() {
 			log.Fatal(err)
 		}
 
-		numEntries := 81920
 		// Create a fixed payload of 1024 bytes using the character 'x'
 		dataPayloadBytes := make([]byte, 1024)
 		for i := range dataPayloadBytes {
@@ -336,7 +333,7 @@ func runBoltDB() {
 			if bucket == nil {
 				return fmt.Errorf("Bucket bolt_map3 not found")
 			}
-			value := bucket.Get([]byte("key-60000"))
+			value := bucket.Get([]byte("key-40000"))
 			if value == nil {
 				return fmt.Errorf("key not found")
 			}
@@ -347,7 +344,7 @@ func runBoltDB() {
 			log.Fatal(err)
 		}
 
-		if record.ID != "bolt_map3-60000" {
+		if record.ID != "bolt_map3-40000" {
 			log.Fatal("Wrong value: ", record.ID)
 		}
 	})
@@ -405,7 +402,6 @@ func runBuntDB() {
 			log.Fatal(err)
 		}
 
-		numEntries := 81920
 		// Create a fixed payload of 1024 bytes using the character 'x'
 		dataPayloadBytes := make([]byte, 1024)
 		for i := range dataPayloadBytes {
@@ -473,7 +469,7 @@ func runBuntDB() {
 
 		var record ComplexRecord
 		err = db.View(func(tx *buntdb.Tx) error {
-			val, err := tx.Get("bunt_map3:key-60000")
+			val, err := tx.Get("bunt_map3:key-40000")
 			if err != nil {
 				return err
 			}
@@ -483,7 +479,7 @@ func runBuntDB() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if record.ID != "bunt_map3-60000" {
+		if record.ID != "bunt_map3-40000" {
 			log.Fatal("Wrong value: ", record.ID)
 		}
 	})
