@@ -629,7 +629,8 @@ func (s *Store) Shrink() error {
 	return nil
 }
 
-// GetSyncInterval returns the current sync interval
+// SetSyncInterval configures how frequently the background goroutine will call FSyncAll()
+// to ensure all changes are durably committed to disk
 func (s *Store) GetSyncInterval() time.Duration {
 	return time.Duration(s.syncInterval.Load())
 }

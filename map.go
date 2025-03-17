@@ -414,7 +414,7 @@ func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *Update[T])) (
 			return upd.Value, false
 		default:
 			// If cancelled, return the original value and state
-			return oldValue, loaded
+			return oldValue, !loaded
 		}
 	})
 	// Mark the key as dirty for asynchronous persistence
@@ -473,7 +473,7 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newVa
 			return upd.Value, false
 		default:
 			// If cancelled, return the original value and state
-			return oldValue, loaded
+			return oldValue, !loaded
 		}
 	})
 	if !ok {
