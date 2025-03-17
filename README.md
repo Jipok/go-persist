@@ -215,9 +215,6 @@ myMap.Range(func(key string, value ValueType) bool {
     // Process each item
     return true // return true to continue, false to stop
 })
-
-// Clean up resources
-myMap.Free()
 ```
 
 </details>

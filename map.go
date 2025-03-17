@@ -478,22 +478,3 @@ func (pm *PersistMap[T]) Range(f func(key string, value T) bool) {
 		return f(key, value.(T))
 	})
 }
-
-// Free unregisters the PersistMap from its parent store and releases all internal resources.
-// After calling Close, the PersistMap becomes invalid and should no longer be used.
-// Multiple calls to Close are safe, with subsequent calls having no effect.
-func (pm *PersistMap[T]) Free() {
-	if pm.Store == nil {
-		return
-	}
-
-	mapName := strings.TrimSuffix(pm.prefix, ":")
-	pm.Store.persistMaps.Delete(mapName)
-	pm.Store.closedMaps.Store(mapName, struct{}{})
-
-	pm.Sync()
-
-	pm.Store = nil
-	pm.data = nil
-	pm.dirty = nil
-}

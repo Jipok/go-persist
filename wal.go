@@ -353,10 +353,10 @@ func (s *Store) Delete(key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	defer s.orphanRecords.Delete(key)
 	if _, err := s.f.Write([]byte(header + line)); err != nil {
 		return err
 	}
+	s.orphanRecords.Delete(key)
 	s.totalWALRecords.Add(1)
 
 	// If a shrink is in progress, also record the delete operation in the pending buffer
@@ -369,7 +369,6 @@ func (s *Store) Delete(key string) error {
 // readRecord reads a single WAL record from the provided reader.
 // It returns the operation (op), key, value and an error if any.
 func readRecord(reader *bufio.Reader) (op string, key string, value string, err error) {
-	// Read header line using ReadSlice to avoid extra allocations
 	headerLine, err := reader.ReadSlice('\n')
 	if err != nil {
 		return "", "", "", err
