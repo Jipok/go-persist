@@ -192,6 +192,8 @@ func (pm *PersistMap[T]) writeRecords(w io.Writer) (int32, error) {
 	return counter, err
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////
+
 // Get retrieves the value associated with the key from the in-memory map.
 //
 // Returns the value and true if the key exists, or a zero value and false otherwise.
@@ -249,16 +251,23 @@ func (pm *PersistMap[T]) SetFSync(key string, value T) error {
 }
 
 // DeleteAsync removes the key from the in-memory map and marks it as dirty for background flush
-func (pm *PersistMap[T]) DeleteAsync(key string) {
+// Returns true if the key existed and was deleted
+func (pm *PersistMap[T]) DeleteAsync(key string) (existed bool) {
 	// Remove the key from the in-memory xsync.Map
-	pm.data.Delete(key)
+	pm.data.Compute(key, func(value interface{}, loaded bool) (interface{}, bool) {
+		existed = loaded
+		return value, true
+	})
 	// Mark the key as dirty
 	pm.dirty.Store(key, struct{}{})
+	return
 }
 
 // Delete immediately deletes the key from both WAL and in-memory map
-func (pm *PersistMap[T]) Delete(key string) {
+// Returns true if the key existed and was deleted
+func (pm *PersistMap[T]) Delete(key string) (existed bool) {
 	pm.data.Compute(key, func(oldValue interface{}, loaded bool) (newValue interface{}, delete bool) {
+		existed = loaded
 		namespacedKey := pm.prefix + key
 		// Write D record to disk(page cache) immediately
 		if err := pm.Store.Delete(namespacedKey); err != nil {
@@ -267,12 +276,15 @@ func (pm *PersistMap[T]) Delete(key string) {
 		// Remove the key from the in-memory xsync.Map
 		return oldValue, true
 	})
+	return
 }
 
 // DeleteFSync writes a delete record to WAL immediately, flushes to disk (fsync),
 // and updates the in-memory map.
 func (pm *PersistMap[T]) DeleteFSync(key string) error {
-	pm.Delete(key)
+	if !pm.Delete(key) {
+		return ErrKeyNotFound
+	}
 	// Flush (fsync) to ensure durability
 	pm.Store.mu.Lock()
 	defer pm.Store.mu.Unlock()

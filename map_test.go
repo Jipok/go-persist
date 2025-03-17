@@ -36,7 +36,14 @@ func TestPersistMap_SetGet(t *testing.T) {
 	}
 
 	// Delete the key.
-	pm.Delete("foo") // Updated: no error returned
+	if !pm.DeleteAsync("foo") {
+		t.Errorf("Expected key 'foo' to be deleted")
+	}
+
+	// Delete the wrong key
+	if pm.Delete("not exist") {
+		t.Errorf("Delete returns true for `not exist` key")
+	}
 
 	// Get should now not find the key.
 	_, ok = pm.Get("foo")
