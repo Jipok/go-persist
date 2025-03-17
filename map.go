@@ -211,6 +211,50 @@ func (pm *PersistMap[T]) Get(key string) (T, bool) {
 	return typedValue, true
 }
 
+// SetInMemory updates the value in memory only without explicitly writing to WAL
+// or marking the key as dirty. This change won't trigger immediate persistence,
+// but it may be persisted if:
+// - This key is later modified with Set/Update/etc.
+// - A Shrink operation occurs
+//
+// Useful for non-exported, derived, or cached fields.
+func (pm *PersistMap[T]) SetInMemory(key string, value T) {
+	pm.data.Store(key, value)
+}
+
+// UpdateInMemory atomically updates a value in memory only without writing to WAL
+// or marking the key as dirty. This change won't trigger immediate persistence,
+// but will be persisted if:
+// - This key is later modified with Set/Update/etc.
+// - A Shrink operation occurs
+//
+// The method uses the same Update struct as regular Update methods for API consistency,
+// but only supports the Set action. Attempts to use Delete or Cancel will cause panic.
+//
+// Useful for non-exported, derived, or cached fields.
+func (pm *PersistMap[T]) UpdateInMemory(key string, updater func(upd *Update[T])) T {
+	newValIface, _ := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
+		var current T
+		if loaded {
+			current = oldValue.(T)
+		}
+		upd := &Update[T]{
+			Value:  current,
+			Exists: loaded,
+			action: actionSet,
+		}
+		updater(upd)
+		// Only the Set action is allowed
+		if upd.action != actionSet {
+			panic("Unsupported action in UpdateInMemory")
+		}
+		return upd.Value, false
+	})
+	return newValIface.(T)
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+
 // SetAsync updates the in-memory map and marks the key as dirty.
 //
 // Its actual persistence is deferred to a background flush, providing higher performance
@@ -348,7 +392,7 @@ func (ua *Update[T]) Cancel() {
 //
 // This method locks the relevant hash table bucket during execution, so avoid long-running
 // operations in the updater function to prevent blocking other bucket operations.
-func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *Update[T])) (newValue T, existed bool) {
+func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *Update[T])) (newValue T, exists bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
@@ -398,7 +442,7 @@ func (pm *PersistMap[T]) UpdateAsync(key string, updater func(upd *Update[T])) (
 //
 // This method locks the relevant hash table bucket during execution, so avoid long-running
 // operations in the updater function to prevent blocking other bucket operations.
-func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newValue T, existed bool) {
+func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newValue T, exists bool) {
 	newValIface, ok := pm.data.Compute(key, func(oldValue interface{}, loaded bool) (interface{}, bool) {
 		var current T
 		if loaded {
@@ -455,8 +499,8 @@ func (pm *PersistMap[T]) Update(key string, updater func(upd *Update[T])) (newVa
 //
 // This method locks the relevant hash table bucket during execution, so avoid long-running
 // operations in the updater function to prevent blocking other bucket operations.
-func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *Update[T])) (newValue T, existed bool, err error) {
-	newValue, existed = pm.Update(key, updater)
+func (pm *PersistMap[T]) UpdateFSync(key string, updater func(upd *Update[T])) (newValue T, exists bool, err error) {
+	newValue, exists = pm.Update(key, updater)
 	// Flush (fsync) to ensure durability
 	pm.Store.mu.Lock()
 	defer pm.Store.mu.Unlock()

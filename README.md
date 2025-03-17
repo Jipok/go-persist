@@ -215,6 +215,12 @@ myMap.Range(func(key string, value ValueType) bool {
     // Process each item
     return true // return true to continue, false to stop
 })
+
+// Memory-only operations (for non-exported or derived fields)
+myMap.SetInMemory("key", value)
+myMap.UpdateInMemory("key", func(upd *persist.Update[T]) {
+    // Only set action allowed
+})
 ```
 
 </details>
