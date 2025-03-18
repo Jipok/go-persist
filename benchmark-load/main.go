@@ -510,7 +510,7 @@ func runPebble() {
 		flushPageCache()
 		start := time.Now()
 
-		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: nil})
+		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: discardLogger{}})
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -551,7 +551,7 @@ func runPebble() {
 	println("Pebble dir size: ", size/1024/1024, " MB")
 
 	measure("Pebble one", func() {
-		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: nil})
+		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: discardLogger{}})
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -582,7 +582,7 @@ func runPebble() {
 	})
 
 	measure("Pebble 40k", func() {
-		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: nil})
+		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: discardLogger{}})
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -930,6 +930,13 @@ func main() {
 			runBadger()
 		case "void":
 			runVoidDB()
+		//
+		case "seq":
+			fmt.Println("\nSequential open-read test (1000 iterations) without flushing disk cache:")
+			sequentialOpenBolt()
+			sequentialOpenPebble()
+			sequentialOpenBadger()
+			sequentialOpenVoid()
 		default:
 			log.Fatal("Unknown db")
 		}

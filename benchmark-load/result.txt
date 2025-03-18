@@ -150,3 +150,26 @@ VoidDB one mem usage: 766.2 KB
 VoidDB 40k read time: 1.78s
 VoidDB 40k mem usage: 1.7 MB
 ```
+
+```
+numEntries = 81920 / 2
+Sequential open-read test (1000 iterations) without flushing disk cache:
+BoltDB 1000 sequential open-read: 0.05s (avg 0.05 ms per iteration)
+Pebble 1000 sequential open-read: 15.28s (avg 15.28 ms per iteration)
+BadgerDB 1000 sequential open-read: 19.35s (avg 19.34 ms per iteration)
+VoidDB 1000 sequential open-read: 0.09s (avg 0.09 ms per iteration)
+
+numEntries = 81920
+Sequential open-read test (1000 iterations) without flushing disk cache:
+BoltDB 1000 sequential open-read: 0.05s (avg 0.05 ms per iteration)
+Pebble 1000 sequential open-read: 15.26s (avg 15.26 ms per iteration)
+BadgerDB 1000 sequential open-read: 19.47s (avg 19.47 ms per iteration)
+VoidDB 1000 sequential open-read: 0.08s (avg 0.08 ms per iteration)
+
+numEntries = 81920 * 2
+Sequential open-read test (1000 iterations) without flushing disk cache:
+BoltDB 1000 sequential open-read: 0.06s (avg 0.06 ms per iteration)
+Pebble 1000 sequential open-read: 17.06s (avg 17.06 ms per iteration)
+BadgerDB 1000 sequential open-read: 23.66s (avg 23.66 ms per iteration)
+VoidDB 1000 sequential open-read: 0.11s (avg 0.11 ms per iteration)
+```
