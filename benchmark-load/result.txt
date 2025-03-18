@@ -1,129 +1,27 @@
 ```
-numEntries = 81920
-
-Persist write time: 3.59s
-BoltDB  write time: 12.68s
-BuntDB  write time: 4.52s
-Pebble  write time: 3.73s
-Badger  write time: 2.14s
-VoidDB  write time: 12.39s
-
-
-Persist file size:  492  MB
-Persist raw load time: 0.92s
-Persist one read time: 1.68s
-Persist one mem usage: 605.3 MB
-Persist 40k read time: 1.77s
-Persist 40k mem usage: 607.2 MB
-
-BoltDB file size:  826  MB
-BoltDB raw load time: 1.53s
-BoltDB one read time: 0.01s
-BoltDB one mem usage: 5.5 KB
-BoltDB 40k read time: 3.25s
-BoltDB 40k mem usage: 1.9 MB
-
-BuntDB file size:  499  MB
-BuntDB raw load time: 0.94s
-BuntDB one read time: 1.59s
-BuntDB one mem usage: 536.9 MB
-BuntDB 40k read time: 1.67s
-BuntDB 40k mem usage: 597.5 MB
-
-Pebble dir size:  70  MB
-Pebble one read time: 0.13s
-Pebble one mem usage: 414.2 KB
-Pebble 40k read time: 0.88s
-Pebble 40k mem usage: 416.6 KB
-
-Badger DB dir size:  64  MB
-Badger one read time: 0.09s
-Badger one mem usage: 85.7 MB
-Badger 40k read time: 0.60s
-Badger 40k mem usage: 207.9 MB
-
-VoidDB dir size:  2245  MB
-VoidDB one read time: 0.02s
-VoidDB one mem usage: 766.5 KB
-VoidDB 40k read time: 3.09s
-VoidDB 40k mem usage: 1.5 MB
-```
-
-```
-numEntries = 81920 * 2
-
-Persist write time: 7.67s
-BoltDB  write time: 267.52s
-BuntDB  write time: 7.84s
-Pebble  write time: 7.98s
-Badger  write time: 4.59s
-VoidDB  write time: 26.82s
-
-
-Persist file size:  985  MB
-Persist raw load time: 1.84s
-Persist one read time: 3.47s
-Persist one mem usage: 1.2 GB
-Persist 40k read time: 3.58s
-Persist 40k mem usage: 1.2 GB
-
-BoltDB file size:  1636  MB
-BoltDB raw load time: 3.62s
-BoltDB one read time: 0.01s
-BoltDB one mem usage: 5.4 KB
-BoltDB 40k read time: 3.82s
-BoltDB 40k mem usage: 2.4 MB
-
-BuntDB file size:  1000  MB
-BuntDB raw load time: 1.96s
-BuntDB one read time: 3.50s
-BuntDB one mem usage: 1.0 GB
-BuntDB 40k read time: 3.79s
-BuntDB 40k mem usage: 1.1 GB
-
-Pebble dir size:  126  MB
-Pebble one read time: 0.18s
-Pebble one mem usage: 568.1 KB
-Pebble 40k read time: 1.36s
-Pebble 40k mem usage: 1.0 MB
-
-Badger DB dir size:  128  MB
-Badger one read time: 0.13s
-Badger one mem usage: 85.7 MB
-Badger 40k read time: 1.00s
-Badger 40k mem usage: 706.6 MB
-
-VoidDB dir size:  4490  MB
-VoidDB one read time: 0.06s
-VoidDB one mem usage: 109.7 KB
-VoidDB 40k read time: 6.07s
-VoidDB 40k mem usage: 1.4 MB
-```
-
-```
 numEntries = 81920 / 2
 
-Persist write time: 1.80s
-BoltDB  write time: 5.36s
-BuntDB  write time: 1.85s
-Pebble  write time: 1.85s
-Badger  write time: 1.05s
-VoidDB  write time: 5.91s
+Persist write time: 1.47s
+BoltDB write time: 5.31s
+BuntDB  write time: 1.83s
+Pebble  write time: 3.32s
+Badger  write time: 1.41s
+VoidDB  write time: 5.54s
 
 
-Persist file size:  246  MB
-Persist raw load time: 0.47s
-Persist one read time: 0.80s
-Persist one mem usage: 302.7 MB
-Persist 40k read time: 0.85s
-Persist 40k mem usage: 304.7 MB
+Persist file size:  241  MB
+Persist raw load time: 0.46s
+Persist one read time: 0.83s
+Persist one mem usage: 301.8 MB
+Persist 40k read time: 0.83s
+Persist 40k mem usage: 302.8 MB
 
 BoltDB file size:  420  MB
-BoltDB raw load time: 0.92s
-BoltDB one read time: 0.00s
+BoltDB raw load time: 0.78s
+BoltDB one read time: 0.01s
 BoltDB one mem usage: 5.2 KB
-BoltDB 40k read time: 2.95s
-BoltDB 40k mem usage: 3.1 MB
+BoltDB 40k read time: 3.01s
+BoltDB 40k mem usage: 481.5 KB
 
 BuntDB file size:  249  MB
 BuntDB raw load time: 0.56s
@@ -132,24 +30,127 @@ BuntDB one mem usage: 268.4 MB
 BuntDB 40k read time: 0.88s
 BuntDB 40k mem usage: 329.1 MB
 
-Pebble dir size:  43  MB
-Pebble one read time: 0.08s
-Pebble one mem usage: 342.8 KB
-Pebble 40k read time: 0.72s
-Pebble 40k mem usage: 916.6 KB
+Pebble dir size:  258  MB
+Pebble one read time: 0.66s
+Pebble one mem usage: 1.3 MB
+Pebble 40k read time: 2.03s
+Pebble 40k mem usage: 627.0 KB
 
-Badger DB dir size:  32  MB
-Badger one read time: 0.08s
+Badger DB dir size:  237  MB
+Badger one read time: 0.07s
 Badger one mem usage: 85.7 MB
-Badger 40k read time: 0.54s
-Badger 40k mem usage: 219.8 MB
+Badger 40k read time: 0.72s
+Badger 40k mem usage: 216.0 MB
 
 VoidDB dir size:  1122  MB
 VoidDB one read time: 0.03s
-VoidDB one mem usage: 766.2 KB
-VoidDB 40k read time: 1.78s
-VoidDB 40k mem usage: 1.7 MB
+VoidDB one mem usage: 0 bytes
+VoidDB 40k read time: 1.75s
+VoidDB 40k mem usage: 181.7 KB
 ```
+
+```
+numEntries = 81920
+
+Persist write time: 2.95s
+BoltDB write time: 10.09s
+BuntDB  write time: 3.83s
+Pebble  write time: 5.78s
+Badger  write time: 3.31s
+VoidDB  write time: 11.78s
+
+
+Persist file size:  483  MB
+Persist raw load time: 0.91s
+Persist one read time: 1.64s
+Persist one mem usage: 602.8 MB
+Persist 40k read time: 1.68s
+Persist 40k mem usage: 603.8 MB
+
+BoltDB file size:  826  MB
+BoltDB raw load time: 1.82s
+BoltDB one read time: 0.01s
+BoltDB one mem usage: 5.5 KB
+BoltDB 40k read time: 3.27s
+BoltDB 40k mem usage: 1.4 MB
+
+BuntDB file size:  492  MB
+BuntDB raw load time: 1.04s
+BuntDB one read time: 1.42s
+BuntDB one mem usage: 533.8 MB
+BuntDB 40k read time: 1.69s
+BuntDB 40k mem usage: 594.2 MB
+
+Pebble dir size:  486  MB
+Pebble one read time: 0.13s
+Pebble one mem usage: 611.6 KB
+Pebble 40k read time: 2.99s
+Pebble 40k mem usage: 1.7 MB
+
+Badger DB dir size:  474  MB
+Badger one read time: 0.12s
+Badger one mem usage: 85.8 MB
+Badger 40k read time: 1.17s
+Badger 40k mem usage: 204.6 MB
+
+VoidDB dir size:  2245  MB
+VoidDB one read time: 0.02s
+VoidDB one mem usage: 0 bytes
+VoidDB 40k read time: 3.17s
+VoidDB 40k mem usage: 1.6 MB
+```
+
+```
+numEntries = 81920 * 2
+
+Persist write time: 5.87s
+BoltDB write time: 261.08s
+BuntDB  write time: 7.59s
+Pebble  write time: 11.17s
+Badger  write time: 7.78s
+VoidDB  write time: 25.38s
+
+
+Persist file size:  967  MB
+Persist raw load time: 1.81s
+Persist one read time: 3.53s
+Persist one mem usage: 1.2 GB
+Persist 40k read time: 3.55s
+Persist 40k mem usage: 1.2 GB
+
+BoltDB file size:  1636  MB
+BoltDB raw load time: 3.63s
+BoltDB one read time: 0.01s
+BoltDB one mem usage: 5.4 KB
+BoltDB 40k read time: 3.79s
+BoltDB 40k mem usage: 657.9 KB
+
+BuntDB file size:  986  MB
+BuntDB raw load time: 1.96s
+BuntDB one read time: 3.24s
+BuntDB one mem usage: 1.0 GB
+BuntDB 40k read time: 3.66s
+BuntDB 40k mem usage: 1.1 GB
+
+Pebble dir size:  974  MB
+Pebble one read time: 0.18s
+Pebble one mem usage: 819.5 KB
+Pebble 40k read time: 4.81s
+Pebble 40k mem usage: 1.4 MB
+
+Badger DB dir size:  943  MB
+Badger one read time: 0.17s
+Badger one mem usage: 85.9 MB
+Badger 40k read time: 3.60s
+Badger 40k mem usage: 392.0 MB
+
+VoidDB dir size:  4490  MB
+VoidDB one read time: 0.05s
+VoidDB one mem usage: 0 bytes
+VoidDB 40k read time: 5.97s
+VoidDB 40k mem usage: 90.7 KB
+```
+
 
 ```
 numEntries = 81920 / 2
@@ -172,4 +173,52 @@ BoltDB 1000 sequential open-read: 0.06s (avg 0.06 ms per iteration)
 Pebble 1000 sequential open-read: 17.06s (avg 17.06 ms per iteration)
 BadgerDB 1000 sequential open-read: 23.66s (avg 23.66 ms per iteration)
 VoidDB 1000 sequential open-read: 0.11s (avg 0.11 ms per iteration)
+```
+
+```
+File store test: 100 files
+
+Bolt Files write time: 0.97s
+Database file bolt_files.db size: 216.23 MB
+Bolt Files one read time: 0.00s
+Bolt Files one mem usage: 3.1 KB
+
+Pebble Files write time: 2.33s
+Database at pebble_files.db size: 206.17 MB
+Pebble Files one read time: 0.04s
+Pebble Files one mem usage: 1.2 MB
+
+Badger Files write time: 0.71s
+Database at badger_files size: 201.08 MB
+Badger Files one read time: 0.70s
+Badger Files one mem usage: 198.1 MB
+
+voidDB Files write time: 0.58s
+Database file void_files.db size: 398.17 MB
+voidDB Files one read time: 0.01s
+voidDB Files one mem usage: 6.7 KB
+```
+
+```
+File store test: 1000 files
+
+Bolt Files write time: 9.97s
+Database file bolt_files.db size: 2025.17 MB
+Bolt Files one read time: 0.01s
+Bolt Files one mem usage: 3.2 KB
+
+Pebble Files write time: 23.22s
+Database at pebble_files.db size: 2015.04 MB
+Pebble Files one read time: 0.08s
+Pebble Files one mem usage: 12.1 MB
+
+Badger Files write time: 5.31s
+Database at badger_files size: 2009.14 MB
+Badger Files one read time: 0.04s
+Badger Files one mem usage: 87.7 MB
+
+voidDB Files write time: 5.08s
+Database file void_files.db size: 3999.59 MB
+voidDB Files one read time: 0.01s
+voidDB Files one mem usage: 6.4 KB
 ```

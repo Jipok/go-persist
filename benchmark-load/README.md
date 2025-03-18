@@ -1,15 +1,15 @@
 # Load Performance Benchmark Results
 
-This benchmark focuses on load time and scaling characteristics across different dataset sizes for three embedded Go key-value systems.
+This benchmark focuses on load time and scaling characteristics across different dataset sizes.
 
 The measurements include file loading, initialization costs, and subsequent operations to evaluate how each solution handles increasingly larger datasets. Pure operational performance is covered in a [other benchmark](https://github.com/Jipok/go-persist/tree/master/benchmark).
 
 ## Dataset Details
 
-- **Structure**: Each record (`ComplexRecord`) includes multiple string fields, nested metadata, and a fixed 1KB data payload.
-- **Key size**: 9–13 bytes.
-- **Average record size**: 1228 ± 4 bytes.
-- **Collections**: 5 separate collections ("maps") per database.
+- **Structure**: Each record (`ComplexRecord`) includes multiple string fields, nested metadata, and a 1KB data payload.
+- **Key size**: 10–14 bytes.
+- **Average record size**: 1215 ± 4 bytes.
+- **Collections**: 5 separate collections ("maps").
 
 **Dataset sizes tested**:
 
@@ -25,23 +25,23 @@ The measurements include file loading, initialization costs, and subsequent oper
 
 | Solution | Small | Medium | Large | Scalability |
 |----------|-------|--------|-------|-------------|
-| **Badger**   | **1.05s** | **2.14s**  | **4.59s** | Linear      |
-| **Persist**  | 1.80s | 3.59s  | 7.67s | Linear      |
-| BuntDB   | 1.85s | 4.52s  | 7.84s | Linear      |
-| Pebble   | 1.85s | 3.73s  | 7.98s | Linear      |
-| VoidDB   | 5.91s | 12.39s | 26.82s | Linear      |
-| BoltDB   | 5.36s | 12.68s | 267.52s | Exponential |
+| **Badger**   | **1.41s** | 3.31s  | 7.78s | Linear      |
+| **Persist**  | 1.47s | **2.95s**  | **5.87s** | Linear      |
+| BuntDB   | 1.83s | 3.83s  | 7.59s | Linear      |
+| Pebble   | 3.32s | 5.78s  | 11.17s | Linear      |
+| VoidDB   | 5.54s | 11.78s | 25.38s | Linear      |
+| BoltDB   | 5.31s | 10.09s | 261.08s | Exponential |
 
 ### 🔎 Single Record Lookup ("map-3-key-40000")
 
 | Solution | Small | Medium | Large |
 |----------|-------|--------|-------|
-| BoltDB   | 0.00s | 0.01s  | 0.01s |
-| VoidDB   | 0.03s | 0.02s  | 0.06s |
-| Badger   | 0.08s | 0.09s  | 0.13s |
-| Pebble   | 0.08s | 0.13s  | 0.18s |
-| BuntDB   | 0.66s | 1.59s  | 3.50s |
-| Persist  | 0.80s | 1.68s  | 3.47s |
+| **BoltDB**   | **0.01s** | **0.01s**  | **0.01s** |
+| **VoidDB**   | 0.03s | 0.02s  | 0.05s |
+| Badger   | 0.07s | 0.12s  | 0.17s |
+| Pebble   | 0.66s | 0.13s  | 0.18s |
+| BuntDB   | 0.66s | 1.42s  | 3.24s |
+| Persist  | 0.83s | 1.64s  | 3.53s |
 
 BoltDB and VoidDB provide near-instant reads directly from disk without significant upfront loading. Badger and Pebble use partial loading strategies with good performance. Persist and BuntDB, designed for repeated efficient access, load data into memory initially, incurring a one-time startup cost.
 
@@ -49,53 +49,55 @@ BoltDB and VoidDB provide near-instant reads directly from disk without signific
 
 | Solution | Small | Medium | Large |
 |----------|-------|--------|-------|
-| **Badger**   | **0.54s** | **0.60s**  | **1.00s** |
-| Pebble   | 0.72s | 0.88s  | 1.36s |
-| Persist  | 0.85s | 1.77s  | 3.58s |
-| BuntDB   | 0.88s | 1.67s  | 3.79s |
-| VoidDB   | 1.78s | 3.09s  | 6.07s |
-| BoltDB   | 2.95s | 3.25s  | 3.82s |
+| **Badger**   | **0.72s** | **1.17s**  | 3.60s |
+| **Persist**  | 0.83s | 1.68s  | **3.55s** |
+| BuntDB   | 0.88s | 1.69s  | 3.66s |
+| VoidDB   | 1.75s | 3.17s  | 5.97s |
+| Pebble   | 2.03s | 2.99s  | 4.81s |
+| BoltDB   | 3.01s | 3.27s  | 3.79s |
 
-Badger stands out with exceptional batch read performance, followed by Pebble. Once loaded, go-persist and BuntDB provide good performance especially. BoltDB's disk-based lookups show consistent but slower performance across all sizes.
+Badger maintains strong batch read performance. But once loaded, go-persist and BuntDB provide good performance especially. BoltDB's disk-based lookups show consistent but slower performance across all sizes.
 
 ### 💾 Storage Efficiency
 
-| Solution | Small | Medium | Large |
-|----------|-------|--------|-------|
-| Badger   | 32 MB | 64 MB  | 128 MB |
-| Pebble   | 43 MB | 70 MB  | 126 MB |
-| Persist  | 246 MB| 492 MB | 985 MB |
-| BuntDB   | 249 MB| 499 MB | 1000 MB |
-| BoltDB   | 420 MB| 826 MB | 1636 MB |
-| VoidDB   | 1122 MB| 2245 MB | 4490 MB |
+| Solution | Small (~205K) | Medium (~410K) | Large (~820K) | Compression |
+|----------|---------------|----------------|---------------|-------------|
+| **Badger**   | **237 MB** | **474 MB**  | **943 MB** | ✅ Yes |
+| Persist  | 241 MB | 483 MB | 967 MB | ❌ No |
+| BuntDB   | 249 MB | 492 MB | 986 MB | ❌ No |
+| Pebble   | 258 MB | 486 MB | 974 MB | ✅ Yes |
+| BoltDB   | 420 MB | 826 MB | 1636 MB | ❌ No |
+| VoidDB   | 1122 MB | 2245 MB | 4490 MB | ❌ No |
 
-Badger and Pebble demonstrate outstanding storage efficiency, requiring significantly less disk space than other solutions. Despite go-persist's focus on speedy in-memory access, it achieves storage efficiency comparable with BuntDB and significantly better (~40%) than BoltDB.
+Badger and Pebble use built-in data compression(Snappy), contributing to their excellent storage efficiency, especially with low-entropy data. With more realistic high-entropy data, the compression advantage is less dramatic but still gives these solutions a slight edge. Persist and BuntDB show comparable storage efficiency without compression mechanisms. BoltDB uses significantly more disk space, while VoidDB requires substantially more space than all other solutions.
+
+This is an important consideration when selecting a solution for specific use cases: with low-entropy data (like JSON with highly repetitive structures and small data variations), the compression advantage of Badger and Pebble would be more pronounced.
 
 ### 📈 Memory Usage After Initial Load (single query)
 
 | Solution | Small | Medium | Large |
 |----------|-------|--------|-------|
-| BoltDB   | **5.2 KB** | **5.5 KB** | **5.4 KB** |
-| VoidDB   | 766.2 KB | 766.5 KB | 109.7 KB |
-| Pebble   | 342.8 KB | 414.2 KB | 568.1 KB |
-| Badger   | 85.7 MB | 85.7 MB | 85.7 MB |
-| BuntDB   | 268.4 MB | 536.9 MB | 1.0 GB |
-| Persist  | 302.7 MB | 605.3 MB | 1.2 GB |
+| **VoidDB**   | **0 bytes** | **0 bytes** | **0 bytes** |
+| **BoltDB**   | 5.2 KB | 5.5 KB | 5.4 KB |
+| Pebble   | 1.3 MB | 611.6 KB | 819.5 KB |
+| Badger   | 85.7 MB | 85.8 MB | 85.9 MB |
+| BuntDB   | 268.4 MB | 533.8 MB | 1.0 GB |
+| Persist  | 301.8 MB | 602.8 MB | 1.2 GB |
 
-BoltDB maintains negligible RAM usage due to its disk-based approach. VoidDB and Pebble also perform well with minimal memory requirements. Badger exhibits consistent memory usage regardless of database size. Persist and BuntDB use significant memory upfront to enable ultra-low-latency repeated access thereafter.
+VoidDB shows exceptionally low initial memory usage, followed by BoltDB's consistent minimal footprint. Badger shows consistent memory requirements regardless of dataset size. Persist and BuntDB use significant memory upfront to enable ultra-low-latency repeated access thereafter.
 
 ### 📈 Memory Usage After Batch Reads (40K reads)
 
 | Solution | Small | Medium | Large |
 |----------|-------|--------|-------|
-| Pebble   | 916.6 KB | 416.6 KB | 1.0 MB |
-| VoidDB   | 1.7 MB | 1.5 MB | 1.4 MB |
-| BoltDB   | 3.1 MB | 1.9 MB | 2.4 MB |
-| Badger   | 219.8 MB | 207.9 MB | 706.6 MB |
-| BuntDB   | 329.1 MB | 597.5 MB | 1.1 GB |
-| Persist  | 304.7 MB | 607.2 MB | 1.2 GB |
+| **VoidDB**   | 181.7 KB | 1.6 MB | **90.7 KB** |
+| **BoltDB**   | 481.5 KB | 1.4 MB | 657.9 KB |
+| Pebble   | 627.0 KB | 1.7 MB | 1.4 MB |
+| Badger   | 216.0 MB | 204.6 MB | 392.0 MB |
+| BuntDB   | 329.1 MB | 594.2 MB | 1.1 GB |
+| Persist  | 302.8 MB | 603.8 MB | 1.2 GB |
 
-Pebble maintains the lowest memory footprint even after batch operations, followed by VoidDB and BoltDB. Badger shows significant memory usage during batch operations but still lower than the full in-memory solutions. Persist and BuntDB consume the most memory as expected from their design approach.
+With high-entropy data, VoidDB shows remarkably low memory usage after batch operations, competing closely with BoltDB and Pebble. Badger consumes significant memory during batch operations but still less than the full in-memory solutions. Persist and BuntDB consume the most memory as expected from their design approach.
 
 ### 🔄 Sequential Open-Read-Close Cycles (1000 iterations)
 
@@ -106,23 +108,31 @@ Pebble maintains the lowest memory footprint even after batch operations, follow
 | Pebble   | 15.28ms | 15.26ms | 17.06ms |
 | BadgerDB  | 19.34ms | 19.47ms | 23.66ms |
 
-This benchmark evaluates how quickly each database can be opened, perform a single read operation, and then closed. This pattern is particularly important for short-lived processes, serverless functions, or applications that need to access data sporadically rather than maintain long-running connections.
+This benchmark evaluates how quickly each solution can be opened, perform a single read operation, and then closed. This pattern is particularly important for short-lived processes, serverless functions, or applications that need to access data sporadically rather than maintain long-running connections.
 
 BoltDB demonstrates exceptional performance in this pattern, requiring only 0.05ms on average to complete the entire open-read-close cycle. VoidDB also performs admirably in this scenario. Pebble and BadgerDB, despite their other advantages, have significantly higher overhead when frequently opened and closed.
+
+## 📂 File Storage Performance (Binary Blobs 2-5MB each)
+
+This benchmark tests how each solution handles storing and retrieving large binary files (2-5MB each), mimicking use cases like document or image storage.
+
+| Solution | Write (100 files) | Write (1000 files) | Read (single file) | Memory (single read) | Storage Efficiency |
+|----------|-------------------|-------------------|-------------------|---------------------|-------------------|
+| **VoidDB**   | **0.58s** | **5.08s** | 0.01s | 6.4 KB | 3999.59 MB |
+| **Badger**   | 0.71s | 5.31s | 0.04s | 87.7 MB | **2009.14 MB** |
+| BoltDB   | 9.97s | 9.97s | **0.01s** | **3.2 KB** | 2025.17 MB |
+| Pebble   | 23.22s | 23.22s | 0.08s | 12.1 MB | 2015.04 MB |
+
+For large binary file storage, VoidDB and Badger significantly outperform others in write speed, while BoltDB and VoidDB excel at extremely fast reads with minimal memory footprint. Badger maintains the best storage efficiency, while VoidDB's storage requirements are nearly double that of other solutions.
 
 ## Conclusion
 
 > [!NOTE]
 > This benchmark focuses specifically on load characteristics, storage efficiency, and scaling properties rather than [operational performance](https://github.com/Jipok/go-persist/tree/master/benchmark).
 
-- **Badger** demonstrates exceptional performance for long-running operations across most metrics, with best-in-class write speeds, batch read performance, and excellent storage efficiency, but shows significant overhead during database initialization.
-
-- **Pebble** offers an outstanding balance of minimal resource usage and strong performance, particularly impressive in storage efficiency and memory optimization, though with higher startup costs.
-
-- **BoltDB** excels in memory efficiency, single record lookups, and especially shines in sequential open-read scenarios, making it ideal for short-lived processes or serverless environments. However, it struggles with write performance at larger scales.
-
-- **Persist** provides very good write performance and strong batch read speeds once loaded, deliberately trading higher memory usage for fast subsequent operations and type-safe access to Go structs.
-
-- **BuntDB** shows similar characteristics to Persist with well-balanced performance across different workloads.
-
-- **VoidDB** demonstrates poor overall performance in most tests, with extremely inefficient storage usage, slow write speeds, and mediocre batch read performance. However, it performs surprisingly well in sequential open-read scenarios.
+- **Persist**: Excellent write and batch read performance, good for applications needing fast repeated access with reasonable memory availability
+- **Badger**: Balanced performance across all operations with excellent storage efficiency; the most versatile solution
+- **BoltDB**: Minimal memory footprint and exceptional open-read-close performance, ideal for serverless or sporadic access patterns
+- **VoidDB**: Extremely low memory usage with excellent single-record performance, though storage inefficient
+- **Pebble**: Good storage efficiency but generally middle-of-pack performance
+- **BuntDB**: Similar performance profile to Persist but with slightly higher storage requirements

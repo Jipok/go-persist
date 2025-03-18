@@ -1,14 +1,18 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/Jipok/go-persist"
@@ -21,7 +25,9 @@ import (
 )
 
 // Number of entries per map
-const numEntries = 81920 / 2
+const numEntries = 81920
+
+var mapNames = []string{"map1", "map2", "map3", "map4", "map5"}
 
 // Complex metadata for a record.
 type Meta struct {
@@ -124,22 +130,104 @@ func measure(name string, f func()) {
 	fmt.Printf("%s read time: %.2fs\n", name, time.Since(start).Seconds())
 
 	var ms2 runtime.MemStats
-	var alloc uint64
 	runtime.ReadMemStats(&ms2)
-	alloc = ms2.HeapAlloc - ms1.HeapAlloc
-	fmt.Printf("%s mem usage: %s\n", name, memstr(alloc))
+
+	// Calculate memory difference as a signed integer
+	diff := int64(ms2.HeapAlloc) - int64(ms1.HeapAlloc)
+	if diff < 0 {
+		diff = 0 // or handle negative difference appropriately
+	}
+	fmt.Printf("%s mem usage: %s\n", name, memstr(uint64(diff)))
 }
 
-var payload string
+// Weighted alphabet for word generation (without spaces)
+// Letters are repeated to mimic natural frequency.
+const weightedWordLetters = "eeeeeeeeeeee" +
+	"tttttttttt" +
+	"aaaaaaa" +
+	"ooooooo" +
+	"iiiiiii" +
+	"nnnnnnn" +
+	"ssssss" +
+	"rrrrrr" +
+	"ddd" +
+	"lll" +
+	"uu" +
+	"cc" +
+	"mm" +
+	"ff" +
+	"gg" +
+	"yy" +
+	"ww" +
+	"pp" +
+	"bb" +
+	"kk" +
+	"xjvqz" +
+	"abcdefghijklmnopqrstuvwxyz" +
+	"0123456789"
+
+// generateRandomWord returns a random word of length n using the weighted alphabet.
+func generateRandomWord(n int, r *rand.Rand) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteByte(weightedWordLetters[r.Intn(len(weightedWordLetters))])
+	}
+	return b.String()
+}
+
+// generateHighEntropyLoremIpsum returns a pseudorandom text of approximate length n using the provided seed.
+// It builds the text word by word, adding random punctuation occasionally.
+func generateHighEntropyLoremIpsum(n int, seed int64) string {
+	r := rand.New(rand.NewSource(seed))
+	var b strings.Builder
+	for b.Len() < n {
+		// Random word length between 3 and 10.
+		wordLength := r.Intn(8) + 3
+		word := generateRandomWord(wordLength, r)
+		// With 20% probability, append random punctuation (either comma or period).
+		if r.Float64() < 0.2 {
+			if r.Float64() < 0.5 {
+				word += ","
+			} else {
+				word += "."
+			}
+		}
+		// Append a space if this is not the first word.
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(word)
+	}
+	result := b.String()
+	// Trim the result to the exact length if it overshoots.
+	if len(result) > n {
+		result = result[:n]
+	}
+	return result
+}
+
+// seedForField generates a reproducible seed based on mapName, index and field identifier.
+func seedForField(mapName string, i int, field string) int64 {
+	h := fnv.New64a() // using FNV-1a hash algorithm
+	h.Write([]byte(mapName))
+	h.Write([]byte(field))
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i))
+	h.Write(buf)
+	return int64(h.Sum64())
+}
 
 // createRecord generates a new ComplexRecord for a given map name and index
 func createRecord(mapName string, i int) ComplexRecord {
 	now := time.Now().Unix()
+	// Compute reproducible seeds for description and data.
+	descriptionSeed := seedForField(mapName, i, "description")
+	dataSeed := seedForField(mapName, i, "data")
 	return ComplexRecord{
 		ID:          fmt.Sprintf("%s-%d", mapName, i),
 		Name:        fmt.Sprintf("Record %d", i),
-		Description: "This is a sample description for a complex record.",
-		Data:        payload,
+		Description: generateHighEntropyLoremIpsum(42, descriptionSeed),
+		Data:        generateHighEntropyLoremIpsum(1024, dataSeed),
 		Meta: Meta{
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -148,17 +236,30 @@ func createRecord(mapName string, i int) ComplexRecord {
 	}
 }
 
-func runPersist() {
-	// Names for 5 maps stored in the same file
-	mapNames := []string{"complex_map1", "complex_map2", "complex_map3", "complex_map4", "complex_map5"}
+// preGenerateRecords pre-generates ComplexRecord entries for each map.
+// Returns a map where the key is the map name and the value is a slice of pre-generated records.
+func preGenerateRecords(names []string) map[string][]ComplexRecord {
+	records := make(map[string][]ComplexRecord)
+	for _, name := range names {
+		slice := make([]ComplexRecord, numEntries)
+		// Pre-generate records for each map
+		for i := 0; i < numEntries; i++ {
+			slice[i] = createRecord(name, i)
+		}
+		records[name] = slice
+	}
+	return records
+}
 
+func runPersist() {
 	// --- PART 1: Generate data ---
 	if _, err := os.Stat("persist.db"); errors.Is(err, os.ErrNotExist) {
+		preGenerated := preGenerateRecords(mapNames)
 		flushPageCache()
 		start := time.Now()
 
 		store := persist.New()
-		// Create an array to hold the maps
+		// Create an array to hold the maps using the global mapNames
 		maps := make([]*persist.PersistMap[ComplexRecord], len(mapNames))
 		// Create each typed map
 		for i, name := range mapNames {
@@ -174,16 +275,15 @@ func runPersist() {
 			log.Fatal(err)
 		}
 
-		// Populate each map with generated records.
+		// Populate each map with pre-generated records.
 		for mapIndex, m := range maps {
 			for i := 0; i < numEntries; i++ {
 				key := fmt.Sprintf("key-%d", i) // key format: "key-i"
-				record := createRecord(mapNames[mapIndex], i)
+				record := preGenerated[mapNames[mapIndex]][i]
 				m.Set(key, record)
 			}
 		}
 
-		// Close the store to flush all data to disk.
 		store.Close()
 		loadDuration := time.Since(start)
 		fmt.Printf("Persist write time: %.2fs\n", loadDuration.Seconds())
@@ -220,7 +320,7 @@ func runPersist() {
 		if !ok {
 			log.Fatal("key not found")
 		}
-		if r.ID != "complex_map3-40000" {
+		if r.ID != "map3-40000" {
 			log.Fatal("Wrong value: ", r.ID)
 		}
 	})
@@ -251,7 +351,7 @@ func runPersist() {
 			if !ok {
 				log.Fatalf("Persist key %s not found", key)
 			}
-			expectedID := fmt.Sprintf("complex_map3-%d", i)
+			expectedID := fmt.Sprintf("map3-%d", i)
 			if r.ID != expectedID {
 				log.Fatalf("Persist wrong value for key %s: got %s, expected %s", key, r.ID, expectedID)
 			}
@@ -261,12 +361,8 @@ func runPersist() {
 }
 
 func runBoltDB() {
-	// Names for 5 buckets stored in the same file
-	mapNames := []string{"bolt_map1", "bolt_map2", "bolt_map3", "bolt_map4", "bolt_map5"}
-
-	// Open the BoltDB file.
-
 	if _, err := os.Stat("bolt.db"); errors.Is(err, os.ErrNotExist) {
+		preGenerated := preGenerateRecords(mapNames)
 		flushPageCache()
 		start := time.Now()
 
@@ -277,16 +373,15 @@ func runBoltDB() {
 
 		// Create buckets and insert data.
 		err = db.Update(func(tx *bolt.Tx) error {
-			// Loop over each bucket name.
 			for _, bucketName := range mapNames {
 				bucket, err := tx.CreateBucketIfNotExists([]byte(bucketName))
 				if err != nil {
 					return err
 				}
-				// Insert generated records into the bucket.
+				// Insert pre-generated records into the bucket.
 				for i := 0; i < numEntries; i++ {
 					key := fmt.Sprintf("key-%d", i)
-					record := createRecord(bucketName, i)
+					record := preGenerated[bucketName][i]
 					// Marshal the record into JSON.
 					encoded, err := json.Marshal(record)
 					if err != nil {
@@ -309,7 +404,7 @@ func runBoltDB() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("BoltDB  write time: %.2fs\n", time.Since(start).Seconds())
+		fmt.Printf("BoltDB write time: %.2fs\n", time.Since(start).Seconds())
 		return
 	}
 
@@ -330,9 +425,9 @@ func runBoltDB() {
 
 		var record ComplexRecord
 		err = db.View(func(tx *bolt.Tx) error {
-			bucket := tx.Bucket([]byte("bolt_map3"))
+			bucket := tx.Bucket([]byte("map3"))
 			if bucket == nil {
-				return fmt.Errorf("bucket bolt_map3 not found")
+				return fmt.Errorf("bucket map3 not found")
 			}
 			value := bucket.Get([]byte("key-40000"))
 			if value == nil {
@@ -345,7 +440,7 @@ func runBoltDB() {
 			log.Fatal(err)
 		}
 
-		if record.ID != "bolt_map3-40000" {
+		if record.ID != "map3-40000" {
 			log.Fatal("Wrong value: ", record.ID)
 		}
 	})
@@ -359,9 +454,9 @@ func runBoltDB() {
 		runtime.GC()
 
 		err = db.View(func(tx *bolt.Tx) error {
-			bucket := tx.Bucket([]byte("bolt_map3"))
+			bucket := tx.Bucket([]byte("map3"))
 			if bucket == nil {
-				return fmt.Errorf("bucket bolt_map3 not found")
+				return fmt.Errorf("bucket map3 not found")
 			}
 
 			// Loop to read 10,000 keys.
@@ -376,7 +471,7 @@ func runBoltDB() {
 				if err := json.Unmarshal(value, &record); err != nil {
 					return err
 				}
-				expectedID := fmt.Sprintf("bolt_map3-%d", i)
+				expectedID := fmt.Sprintf("map3-%d", i)
 				if record.ID != expectedID {
 					return fmt.Errorf("BoltDB wrong value for key %s: got %s, expected %s", key, record.ID, expectedID)
 				}
@@ -390,10 +485,8 @@ func runBoltDB() {
 }
 
 func runBuntDB() {
-	// Names for 5 logical maps (using key prefixes)
-	mapNames := []string{"bunt_map1", "bunt_map2", "bunt_map3", "bunt_map4", "bunt_map5"}
-
 	if _, err := os.Stat("bunt.db"); errors.Is(err, os.ErrNotExist) {
+		preGenerated := preGenerateRecords(mapNames)
 		flushPageCache()
 		start := time.Now()
 
@@ -408,7 +501,7 @@ func runBuntDB() {
 				for i := 0; i < numEntries; i++ {
 					// Construct key using map name as prefix.
 					key := fmt.Sprintf("%s:key-%d", mapName, i)
-					record := createRecord(mapName, i)
+					record := preGenerated[mapName][i]
 					encoded, err := json.Marshal(record)
 					if err != nil {
 						return err
@@ -452,7 +545,7 @@ func runBuntDB() {
 
 		var record ComplexRecord
 		err = db.View(func(tx *buntdb.Tx) error {
-			val, err := tx.Get("bunt_map3:key-40000")
+			val, err := tx.Get("map3:key-40000")
 			if err != nil {
 				return err
 			}
@@ -462,7 +555,7 @@ func runBuntDB() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if record.ID != "bunt_map3-40000" {
+		if record.ID != "map3-40000" {
 			log.Fatal("Wrong value: ", record.ID)
 		}
 	})
@@ -477,7 +570,7 @@ func runBuntDB() {
 
 		err = db.View(func(tx *buntdb.Tx) error {
 			for i := 0; i < 40000; i++ {
-				key := fmt.Sprintf("bunt_map3:key-%d", i)
+				key := fmt.Sprintf("map3:key-%d", i)
 				val, err := tx.Get(key)
 				if err != nil {
 					return err
@@ -487,7 +580,7 @@ func runBuntDB() {
 				if err := json.Unmarshal([]byte(val), &record); err != nil {
 					return err
 				}
-				expectedID := fmt.Sprintf("bunt_map3-%d", i)
+				expectedID := fmt.Sprintf("map3-%d", i)
 				if record.ID != expectedID {
 					return fmt.Errorf("BuntDB wrong value for key %s: got %s, expected %s", key, record.ID, expectedID)
 				}
@@ -502,11 +595,10 @@ func runBuntDB() {
 }
 
 func runPebble() {
-	// Names for 5 logical maps using key prefixes
-	mapNames := []string{"pebble_map1", "pebble_map2", "pebble_map3", "pebble_map4", "pebble_map5"}
 
 	// If the Pebble database does not exist, generate the data.
 	if _, err := os.Stat("pebble.db"); errors.Is(err, os.ErrNotExist) {
+		preGenerated := preGenerateRecords(mapNames)
 		flushPageCache()
 		start := time.Now()
 
@@ -520,7 +612,7 @@ func runPebble() {
 			for i := 0; i < numEntries; i++ {
 				// Construct key using map name as prefix.
 				key := fmt.Sprintf("%s:key-%d", mapName, i)
-				record := createRecord(mapName, i)
+				record := preGenerated[mapName][i]
 				// Marshal the record into JSON.
 				encoded, err := json.Marshal(record)
 				if err != nil {
@@ -562,8 +654,8 @@ func runPebble() {
 		}()
 		runtime.GC()
 
-		// Retrieve a single key from 'pebble_map3'
-		key := "pebble_map3:key-40000"
+		// Retrieve a single key from 'map3'
+		key := "map3:key-40000"
 		value, closer, err := db.Get([]byte(key))
 		if err != nil {
 			log.Fatal(err)
@@ -576,7 +668,7 @@ func runPebble() {
 		if err := json.Unmarshal(value, &record); err != nil {
 			log.Fatal(err)
 		}
-		if record.ID != "pebble_map3-40000" {
+		if record.ID != "map3-40000" {
 			log.Fatalf("Wrong value: %s", record.ID)
 		}
 	})
@@ -595,7 +687,7 @@ func runPebble() {
 
 		// Loop to read 40,000 keys.
 		for i := 0; i < 40000; i++ {
-			key := fmt.Sprintf("pebble_map3:key-%d", i)
+			key := fmt.Sprintf("map3:key-%d", i)
 			value, closer, err := db.Get([]byte(key))
 			if err != nil {
 				log.Fatalf("Pebble key %s not found: %v", key, err)
@@ -607,7 +699,7 @@ func runPebble() {
 			if err := json.Unmarshal(value, &record); err != nil {
 				log.Fatal(err)
 			}
-			expectedID := fmt.Sprintf("pebble_map3-%d", i)
+			expectedID := fmt.Sprintf("map3-%d", i)
 			if record.ID != expectedID {
 				log.Fatalf("Pebble wrong value for key %s: got %s, expected %s", key, record.ID, expectedID)
 			}
@@ -616,29 +708,20 @@ func runPebble() {
 }
 
 func runBadger() {
-	// Names for 5 logical maps (using key prefixes)
-	mapNames := []string{"badger_map1", "badger_map2", "badger_map3", "badger_map4", "badger_map5"}
-
 	// Check if the "badger" directory exists.
-	if _, err := os.Stat("badger"); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat("badger.db"); errors.Is(err, os.ErrNotExist) {
+		preGenerated := preGenerateRecords(mapNames)
 		flushPageCache()
 		start := time.Now()
 
 		// Open Badger DB with directory "badger"
-		opts := badger.DefaultOptions("badger")
+		opts := badger.DefaultOptions("badger.db")
 		opts.SyncWrites = false
 		opts.Logger = nil
 		db, err := badger.Open(opts)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		// Create a fixed payload of 1024 bytes using the character 'x'
-		dataPayloadBytes := make([]byte, 1024)
-		for i := range dataPayloadBytes {
-			dataPayloadBytes[i] = 'x'
-		}
-		dataPayload := string(dataPayloadBytes)
 
 		// Use WriteBatch for efficient batch writes
 		wb := db.NewWriteBatch()
@@ -649,17 +732,7 @@ func runBadger() {
 		for _, mapName := range mapNames {
 			for i := 0; i < numEntries; i++ {
 				key := fmt.Sprintf("%s:key-%d", mapName, i)
-				record := ComplexRecord{
-					ID:          fmt.Sprintf("%s-%d", mapName, i),
-					Name:        fmt.Sprintf("Record %d", i),
-					Description: "This is a sample description for a complex record.",
-					Data:        dataPayload,
-					Meta: Meta{
-						CreatedAt: time.Now().Unix(),
-						UpdatedAt: time.Now().Unix(),
-						Tags:      []string{"tag1", "tag2", "tag3"},
-					},
-				}
+				record := preGenerated[mapName][i]
 				// Marshal the record into JSON.
 				encoded, err := json.Marshal(record)
 				if err != nil {
@@ -695,14 +768,14 @@ func runBadger() {
 
 	flushPageCache()
 	// Calculate and print the total size of the "badger" directory.
-	dirSz, err := dirSize("badger")
+	dirSz, err := dirSize("badger.db")
 	if err != nil {
 		log.Fatal(err)
 	}
 	println("Badger DB dir size: ", dirSz/1024/1024, " MB")
 
 	measure("Badger one", func() {
-		opts := badger.DefaultOptions("badger")
+		opts := badger.DefaultOptions("badger.db")
 		opts.SyncWrites = false
 		opts.Logger = nil
 		db, err := badger.Open(opts)
@@ -714,8 +787,8 @@ func runBadger() {
 
 		var record ComplexRecord
 		err = db.View(func(txn *badger.Txn) error {
-			// Get the record from the "badger_map3" set.
-			item, err := txn.Get([]byte("badger_map3:key-40000"))
+			// Get the record from the "map3" set.
+			item, err := txn.Get([]byte("map3:key-40000"))
 			if err != nil {
 				return err
 			}
@@ -728,13 +801,13 @@ func runBadger() {
 			log.Fatal(err)
 		}
 
-		if record.ID != "badger_map3-40000" {
+		if record.ID != "map3-40000" {
 			log.Fatal("Wrong value: ", record.ID)
 		}
 	})
 
 	measure("Badger 40k", func() {
-		opts := badger.DefaultOptions("badger")
+		opts := badger.DefaultOptions("badger.db")
 		opts.SyncWrites = false
 		opts.Logger = nil
 		db, err := badger.Open(opts)
@@ -746,7 +819,7 @@ func runBadger() {
 
 		err = db.View(func(txn *badger.Txn) error {
 			for i := 0; i < 40000; i++ {
-				key := fmt.Sprintf("badger_map3:key-%d", i)
+				key := fmt.Sprintf("map3:key-%d", i)
 				item, err := txn.Get([]byte(key))
 				if err != nil {
 					return err
@@ -758,7 +831,7 @@ func runBadger() {
 				}); err != nil {
 					return err
 				}
-				expectedID := fmt.Sprintf("badger_map3-%d", i)
+				expectedID := fmt.Sprintf("map3-%d", i)
 				if record.ID != expectedID {
 					return fmt.Errorf("badger wrong value for key %s: got %s, expected %s", key, record.ID, expectedID)
 				}
@@ -772,13 +845,12 @@ func runBadger() {
 }
 
 func runVoidDB() {
-	// Names for 5 logical maps using keyspaces
-	mapNames := []string{"void_map1", "void_map2", "void_map3", "void_map4", "void_map5"}
 	const capacity = 1024 * 1024 * 1024 * 20 // 20 GB
-	const path = "void"
+	const path = "void.db"
 
 	// Check if the voidDB directory exists; if not, populate with data
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		preGenerated := preGenerateRecords(mapNames)
 		flushPageCache()
 		start := time.Now()
 
@@ -800,7 +872,7 @@ func runVoidDB() {
 				// Insert generated records into the keyspace
 				for i := 0; i < numEntries; i++ {
 					key := []byte(fmt.Sprintf("key-%d", i))
-					record := createRecord(mapName, i)
+					record := preGenerated[mapName][i]
 					encoded, err := json.Marshal(record)
 					if err != nil {
 						return err
@@ -845,8 +917,8 @@ func runVoidDB() {
 
 		// Use a read-only transaction for retrieving a single record
 		err = v.View(func(txn *voidDB.Txn) error {
-			// Open a cursor for the "void_map3" keyspace
-			cur, err := txn.OpenCursor([]byte("void_map3"))
+			// Open a cursor for the "map3" keyspace
+			cur, err := txn.OpenCursor([]byte("map3"))
 			if err != nil {
 				return err
 			}
@@ -859,7 +931,7 @@ func runVoidDB() {
 			if err := json.Unmarshal(val, &record); err != nil {
 				return err
 			}
-			if record.ID != "void_map3-40000" {
+			if record.ID != "map3-40000" {
 				return fmt.Errorf("Wrong value: %s", record.ID)
 			}
 			return nil
@@ -880,7 +952,7 @@ func runVoidDB() {
 		// Use a read-only transaction for retrieving 40k records
 		err = v.View(func(txn *voidDB.Txn) error {
 			// Open a cursor for the "void_map3" keyspace
-			cur, err := txn.OpenCursor([]byte("void_map3"))
+			cur, err := txn.OpenCursor([]byte("map3"))
 			if err != nil {
 				return err
 			}
@@ -895,7 +967,7 @@ func runVoidDB() {
 				if err := json.Unmarshal(val, &record); err != nil {
 					return err
 				}
-				expectedID := fmt.Sprintf("void_map3-%d", i)
+				expectedID := fmt.Sprintf("map3-%d", i)
 				if record.ID != expectedID {
 					return fmt.Errorf("VoidDB wrong value for key %s: got %s, expected %s", key, record.ID, expectedID)
 				}
@@ -909,13 +981,6 @@ func runVoidDB() {
 }
 
 func main() {
-	// Prefill a fixed payload of 1024 bytes using the character 'x'
-	dataPayloadBytes := make([]byte, 1024)
-	for i := range dataPayloadBytes {
-		dataPayloadBytes[i] = 'x'
-	}
-	payload = string(dataPayloadBytes)
-
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "persist":
@@ -937,6 +1002,16 @@ func main() {
 			sequentialOpenPebble()
 			sequentialOpenBadger()
 			sequentialOpenVoid()
+		case "files":
+			precomputePayloads(numFiles)
+			println("File store test:", numFiles, "files\n")
+			runBoltFiles()
+			println()
+			runPebbleFiles()
+			println()
+			runBadgerFiles()
+			println()
+			runVoidDBFiles()
 		default:
 			log.Fatal("Unknown db")
 		}
@@ -951,6 +1026,6 @@ func main() {
 		println()
 		runBadger()
 		println()
-		runVoidDB() // voidDB: write would exceed scope of memory map
+		runVoidDB()
 	}
 }
