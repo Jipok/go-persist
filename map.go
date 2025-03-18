@@ -214,7 +214,9 @@ func (pm *PersistMap[T]) Get(key string) (T, bool) {
 // SetInMemory updates the value in memory only without explicitly writing to WAL
 // or marking the key as dirty. This change won't trigger immediate persistence,
 // but it may be persisted if:
+//
 // - This key is later modified with Set/Update/etc.
+//
 // - A Shrink operation occurs
 //
 // Useful for non-exported, derived, or cached fields.
@@ -225,7 +227,9 @@ func (pm *PersistMap[T]) SetInMemory(key string, value T) {
 // UpdateInMemory atomically updates a value in memory only without writing to WAL
 // or marking the key as dirty. This change won't trigger immediate persistence,
 // but will be persisted if:
+//
 // - This key is later modified with Set/Update/etc.
+//
 // - A Shrink operation occurs
 //
 // The method uses the same Update struct as regular Update methods for API consistency,
