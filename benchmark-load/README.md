@@ -116,14 +116,14 @@ BoltDB demonstrates exceptional performance in this pattern, requiring only 0.05
 
 This benchmark tests how each solution handles storing and retrieving large binary files (2-5MB each), mimicking use cases like document or image storage.
 
-| Solution | Write (100 files) | Write (1000 files) | Read (single file) | Memory (single read) | Storage Efficiency |
+| Solution | Write (100 files) | Write (1000 files) | Read (single file) | Memory (single read) | Storage Efficiency (1000 files) |
 |----------|-------------------|-------------------|-------------------|---------------------|-------------------|
-| **VoidDB**   | **0.58s** | **5.08s** | 0.01s | 6.4 KB | 3999.59 MB |
-| **Badger**   | 0.71s | 5.31s | 0.04s | 87.7 MB | **2009.14 MB** |
-| BoltDB   | 9.97s | 9.97s | **0.01s** | **3.2 KB** | 2025.17 MB |
-| Pebble   | 23.22s | 23.22s | 0.08s | 12.1 MB | 2015.04 MB |
+| **VoidDB**   | **0.87s** | **8.41s** | **0.01s** | 6.4 KB | 5255.59 MB |
+| **Badger**   | 1.10s | 12.39s | 0.07s | 88.2 MB | **3444.60 MB** |
+| BoltDB   | 1.59s | 30.52s | 0.01s | **3.0 KB** | 3460.61 MB |
+| Pebble   | 3.06s | 73.64s | 0.11s | 12.1 MB | 3459.34 MB |
 
-For large binary file storage, VoidDB and Badger significantly outperform others in write speed, while BoltDB and VoidDB excel at extremely fast reads with minimal memory footprint. Badger maintains the best storage efficiency, while VoidDB's storage requirements are nearly double that of other solutions.
+VoidDB delivers the fastest write speeds but uses 52% more storage space than competitors. Badger balances good performance with optimal storage efficiency. Pebble significantly lags in write performance, taking 8.7x longer than VoidDB.
 
 ## Conclusion
 

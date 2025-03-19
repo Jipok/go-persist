@@ -178,47 +178,47 @@ VoidDB 1000 sequential open-read: 0.11s (avg 0.11 ms per iteration)
 ```
 File store test: 100 files
 
-Bolt Files write time: 0.97s
-Database file bolt_files.db size: 216.23 MB
+Bolt Files write time: 1.59s
+Database file bolt_files.db size: 328.06 MB
 Bolt Files one read time: 0.00s
 Bolt Files one mem usage: 3.1 KB
 
-Pebble Files write time: 2.33s
-Database at pebble_files.db size: 206.17 MB
+Pebble Files write time: 3.06s
+Database at pebble_files.db size: 323.39 MB
 Pebble Files one read time: 0.04s
 Pebble Files one mem usage: 1.2 MB
 
-Badger Files write time: 0.71s
-Database at badger_files size: 201.08 MB
-Badger Files one read time: 0.70s
-Badger Files one mem usage: 198.1 MB
+Badger Files write time: 1.10s
+Database at badger_files size: 312.93 MB
+Badger Files one read time: 0.94s
+Badger Files one mem usage: 197.5 MB
 
-voidDB Files write time: 0.58s
+voidDB Files write time: 0.87s
 Database file void_files.db size: 398.17 MB
-voidDB Files one read time: 0.01s
+voidDB Files one read time: 0.00s
 voidDB Files one mem usage: 6.7 KB
 ```
 
 ```
 File store test: 1000 files
 
-Bolt Files write time: 9.97s
-Database file bolt_files.db size: 2025.17 MB
+Bolt Files write time: 30.52s
+Database file bolt_files.db size: 3460.61 MB
 Bolt Files one read time: 0.01s
-Bolt Files one mem usage: 3.2 KB
+Bolt Files one mem usage: 3.0 KB
 
-Pebble Files write time: 23.22s
-Database at pebble_files.db size: 2015.04 MB
-Pebble Files one read time: 0.08s
+Pebble Files write time: 73.64s
+Database at pebble_files.db size: 3459.34 MB
+Pebble Files one read time: 0.11s
 Pebble Files one mem usage: 12.1 MB
 
-Badger Files write time: 5.31s
-Database at badger_files size: 2009.14 MB
-Badger Files one read time: 0.04s
-Badger Files one mem usage: 87.7 MB
+Badger Files write time: 12.39s
+Database at badger_files size: 3444.60 MB
+Badger Files one read time: 0.07s
+Badger Files one mem usage: 88.2 MB
 
-voidDB Files write time: 5.08s
-Database file void_files.db size: 3999.59 MB
+voidDB Files write time: 8.41s
+Database file void_files.db size: 5255.59 MB
 voidDB Files one read time: 0.01s
 voidDB Files one mem usage: 6.4 KB
 ```

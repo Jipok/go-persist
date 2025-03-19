@@ -3,9 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
+	"math"
 	"math/rand"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/cockroachdb/pebble"
@@ -14,9 +17,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const numFiles = 100
-const fileToCheck = 50
-const fileKey = "file-50"
+const numFiles = 1000
+const fileToCheck = 500
+const fileKey = "file-500"
 
 var files_payloads [][]byte
 
@@ -31,11 +34,22 @@ func createPayload(size int, seed int64) []byte {
 }
 
 // getFileSize returns a reproducible file size (in bytes) for a given file index.
-// The size will vary between 2 MB and 5 MB.
+// The size will vary between 2MB and 5MB even for small i values.
 func getFileSize(i int) int {
 	const MB = 1024 * 1024
-	// This produces a size between 2 MB and (2 MB + 3 MB - 1) i.e. ~5 MB.
-	return 2*MB + ((i * 17) % (3 * MB))
+	// Special-case: if i is 0, return exactly 2MB
+	if i == 0 {
+		return 2 * MB
+	}
+	h := fnv.New32a()
+	// Write the string representation of i into the hash generator
+	h.Write([]byte(strconv.Itoa(i)))
+	// Get a hash sum which is then mapped into [0,1)
+	hashValue := h.Sum32()
+	r := float64(hashValue) / float64(math.MaxUint32)
+	// Scale the random fraction to the full variation range (3MB)
+	variation := int(r * float64(3*MB))
+	return 2*MB + variation
 }
 
 // precomputePayloads generates random payloads for numFiles files
