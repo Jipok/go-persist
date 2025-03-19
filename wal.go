@@ -718,6 +718,9 @@ func (s *Store) StartAutoShrink(checkInterval time.Duration, shrinkRatio float64
 	if s.stopAutoShrink != nil {
 		return errors.New("AutoShrink goroutine is already working")
 	}
+	if shrinkRatio <= 1.0 {
+		return errors.New("shrinkRatio must be more then 1.0")
+	}
 
 	s.stopAutoShrink = make(chan struct{})
 	s.wg.Add(1)
