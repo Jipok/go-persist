@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"math/rand"
 	"os"
 	"runtime"
 	"time"
@@ -20,10 +21,13 @@ import (
 )
 
 // Number of entries per map
-const numEntries = 81920
+const numEntries = 81920 * 2
 
-var mapNames = []string{"map1", "map2", "map3", "map4", "map5"}
-var records map[string][]ComplexRecord
+var (
+	mapNames = []string{"map1", "map2", "map3", "map4", "map5"}
+	records  map[string][]ComplexRecord
+	keys     []int
+)
 
 // Complex metadata for a record.
 type Meta struct {
@@ -41,15 +45,40 @@ type ComplexRecord struct {
 	Meta        Meta   // nested metadata
 }
 
-// Generates a reproducible seed based on mapName, index and field identifier.
-func seedForField(mapName string, i int, field string) int64 {
-	h := fnv.New64a() // using FNV-1a hash algorithm
-	h.Write([]byte(mapName))
-	h.Write([]byte(field))
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(i))
-	h.Write(buf)
-	return int64(h.Sum64())
+// Prepare data for load benchmark
+func preGeneratedRecords() map[string][]ComplexRecord {
+	if records != nil {
+		return records
+	}
+	prepareKeys()
+
+	// Samples generation
+	records = make(map[string][]ComplexRecord)
+	for _, name := range mapNames {
+		slice := make([]ComplexRecord, numEntries)
+		// Pre-generate records for each map
+		for i := 0; i < numEntries; i++ {
+			slice[i] = createRecord(name, i)
+		}
+		records[name] = slice
+	}
+	return records
+}
+
+func prepareKeys() {
+	if keys != nil {
+		return
+	}
+	keys = make([]int, 40000)
+	for i := 0; i < 40000; i++ {
+		keys[i] = i
+	}
+	// Set a fixed random seed for reproducibility
+	rand.Seed(42)
+	// Shuffle the slice of keys in random order
+	rand.Shuffle(len(keys), func(i, j int) {
+		keys[i], keys[j] = keys[j], keys[i]
+	})
 }
 
 // Generates a new ComplexRecord for a given map name and index
@@ -71,23 +100,18 @@ func createRecord(mapName string, i int) ComplexRecord {
 	}
 }
 
-// preGenerateRecords pre-generates(once) ComplexRecord entries for each map.
-// Returns a map where the key is the map name and the value is a slice of pre-generated records.
-func preGeneratedRecords() map[string][]ComplexRecord {
-	if records != nil {
-		return records
-	}
-	records = make(map[string][]ComplexRecord)
-	for _, name := range mapNames {
-		slice := make([]ComplexRecord, numEntries)
-		// Pre-generate records for each map
-		for i := 0; i < numEntries; i++ {
-			slice[i] = createRecord(name, i)
-		}
-		records[name] = slice
-	}
-	return records
+// Generates a reproducible seed based on mapName, index and field identifier.
+func seedForField(mapName string, i int, field string) int64 {
+	h := fnv.New64a() // using FNV-1a hash algorithm
+	h.Write([]byte(mapName))
+	h.Write([]byte(field))
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i))
+	h.Write(buf)
+	return int64(h.Sum64())
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 func runPersist() {
 	// --- PART 1: Generate data ---
@@ -163,6 +187,7 @@ func runPersist() {
 		}
 	})
 
+	prepareKeys()
 	measure("Persist 40k", func() {
 		store := persist.New()
 		defer store.Close()
@@ -183,7 +208,7 @@ func runPersist() {
 		}
 		runtime.GC()
 
-		for i := 0; i < 40000; i++ {
+		for _, i := range keys {
 			key := fmt.Sprintf("key-%d", i) // key format: "key-i"
 			r, ok := maps[2].Get(key)
 			if !ok {
@@ -195,7 +220,7 @@ func runPersist() {
 			}
 		}
 	})
-
+	println()
 }
 
 func runBoltDB() {
@@ -283,6 +308,7 @@ func runBoltDB() {
 		}
 	})
 
+	prepareKeys()
 	measure("BoltDB 40k", func() {
 		db, err := bolt.Open("bolt.db", 0666, nil)
 		if err != nil {
@@ -298,7 +324,7 @@ func runBoltDB() {
 			}
 
 			// Loop to read 10,000 keys.
-			for i := 0; i < 40000; i++ {
+			for _, i := range keys {
 				key := fmt.Sprintf("key-%d", i)
 				value := bucket.Get([]byte(key))
 				if value == nil {
@@ -320,6 +346,7 @@ func runBoltDB() {
 			log.Fatal(err)
 		}
 	})
+	println()
 }
 
 func runBuntDB() {
@@ -398,6 +425,7 @@ func runBuntDB() {
 		}
 	})
 
+	prepareKeys()
 	measure("BuntDB 40k", func() {
 		db, err := buntdb.Open("bunt.db")
 		if err != nil {
@@ -407,7 +435,7 @@ func runBuntDB() {
 		runtime.GC()
 
 		err = db.View(func(tx *buntdb.Tx) error {
-			for i := 0; i < 40000; i++ {
+			for _, i := range keys {
 				key := fmt.Sprintf("map3:key-%d", i)
 				val, err := tx.Get(key)
 				if err != nil {
@@ -429,11 +457,10 @@ func runBuntDB() {
 			log.Fatal(err)
 		}
 	})
-
+	println()
 }
 
 func runPebble() {
-
 	// If the Pebble database does not exist, generate the data.
 	if _, err := os.Stat("pebble.db"); errors.Is(err, os.ErrNotExist) {
 		preGenerated := preGeneratedRecords()
@@ -507,6 +534,7 @@ func runPebble() {
 		}
 	})
 
+	prepareKeys()
 	measure("Pebble 40k", func() {
 		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: discardLogger{}})
 		if err != nil {
@@ -520,7 +548,7 @@ func runPebble() {
 		runtime.GC()
 
 		// Loop to read 40,000 keys.
-		for i := 0; i < 40000; i++ {
+		for _, i := range keys {
 			key := fmt.Sprintf("map3:key-%d", i)
 			value, closer, err := db.Get([]byte(key))
 			if err != nil {
@@ -539,6 +567,7 @@ func runPebble() {
 			}
 		}
 	})
+	println()
 }
 
 func runBadger() {
@@ -635,6 +664,7 @@ func runBadger() {
 		}
 	})
 
+	prepareKeys()
 	measure("Badger 40k", func() {
 		opts := badger.DefaultOptions("badger.db")
 		opts.SyncWrites = false
@@ -647,7 +677,7 @@ func runBadger() {
 		runtime.GC()
 
 		err = db.View(func(txn *badger.Txn) error {
-			for i := 0; i < 40000; i++ {
+			for _, i := range keys {
 				key := fmt.Sprintf("map3:key-%d", i)
 				item, err := txn.Get([]byte(key))
 				if err != nil {
@@ -671,6 +701,7 @@ func runBadger() {
 			log.Fatal(err)
 		}
 	})
+	println()
 }
 
 func runVoidDB() {
@@ -765,6 +796,7 @@ func runVoidDB() {
 		}
 	})
 
+	prepareKeys()
 	measure("VoidDB 40k", func() {
 		v, err := voidDB.OpenVoid(path, capacity)
 		if err != nil {
@@ -781,7 +813,7 @@ func runVoidDB() {
 				return err
 			}
 			// Loop to read 40,000 keys
-			for i := 0; i < 40000; i++ {
+			for _, i := range keys {
 				key := []byte(fmt.Sprintf("key-%d", i))
 				val, err := cur.Get(key)
 				if err != nil {
@@ -802,4 +834,5 @@ func runVoidDB() {
 			log.Fatal(err)
 		}
 	})
+	println()
 }
