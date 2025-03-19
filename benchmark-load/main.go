@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log"
 	"math/rand"
@@ -12,29 +10,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
-
-// Number of entries per map
-const numEntries = 81920
-
-var mapNames = []string{"map1", "map2", "map3", "map4", "map5"}
-
-// Complex metadata for a record.
-type Meta struct {
-	CreatedAt int64    // record creation timestamp
-	UpdatedAt int64    // record last update timestamp
-	Tags      []string // list of tags
-}
-
-// ComplexRecord is a more complex structure with multiple fields.
-type ComplexRecord struct {
-	ID          string // record identifier
-	Name        string // record name
-	Description string // record description
-	Data        string // fixed-size data payload
-	Meta        Meta   // nested metadata
-}
 
 // flushPageCache flushes the filesystem page cache.
 // NOTE: This requires root privileges.
@@ -80,21 +58,6 @@ func readFileToMemory(filename string) (int, error) {
 	}
 
 	return len(buffer), nil
-}
-
-// dirSize calculates the total size of all files in the given directory.
-func dirSize(path string) (int64, error) {
-	var size int64
-	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-	return size, err
 }
 
 func memstr(alloc uint64) string {
@@ -197,49 +160,53 @@ func generateHighEntropyLoremIpsum(n int, seed int64) string {
 	return result
 }
 
-// seedForField generates a reproducible seed based on mapName, index and field identifier.
-func seedForField(mapName string, i int, field string) int64 {
-	h := fnv.New64a() // using FNV-1a hash algorithm
-	h.Write([]byte(mapName))
-	h.Write([]byte(field))
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(i))
-	h.Write(buf)
-	return int64(h.Sum64())
-}
+// printSize prints the logical size and the actual disk usage (physical size) for the given file or directory
+func printSize(path string) {
+	var logicalSize, physicalSize int64
 
-// createRecord generates a new ComplexRecord for a given map name and index
-func createRecord(mapName string, i int) ComplexRecord {
-	now := time.Now().Unix()
-	// Compute reproducible seeds for description and data.
-	descriptionSeed := seedForField(mapName, i, "description")
-	dataSeed := seedForField(mapName, i, "data")
-	return ComplexRecord{
-		ID:          fmt.Sprintf("%s-%d", mapName, i),
-		Name:        fmt.Sprintf("Record %d", i),
-		Description: generateHighEntropyLoremIpsum(42, descriptionSeed),
-		Data:        generateHighEntropyLoremIpsum(1024, dataSeed),
-		Meta: Meta{
-			CreatedAt: now,
-			UpdatedAt: now,
-			Tags:      []string{"tag1", "tag2", "tag3"},
-		},
+	fi, err := os.Stat(path)
+	if err != nil {
+		log.Printf("Error getting file info for '%s': %v", path, err)
+		return
 	}
-}
 
-// preGenerateRecords pre-generates ComplexRecord entries for each map.
-// Returns a map where the key is the map name and the value is a slice of pre-generated records.
-func preGenerateRecords(names []string) map[string][]ComplexRecord {
-	records := make(map[string][]ComplexRecord)
-	for _, name := range names {
-		slice := make([]ComplexRecord, numEntries)
-		// Pre-generate records for each map
-		for i := 0; i < numEntries; i++ {
-			slice[i] = createRecord(name, i)
+	if !fi.IsDir() {
+		// For a file: logical size is info.Size()
+		logicalSize = fi.Size()
+		// Attempt to get the underlying syscall.Stat_t for physical block count
+		if statT, ok := fi.Sys().(*syscall.Stat_t); ok {
+			// Multiply block count by 512 (bytes per block on Linux)
+			physicalSize = int64(statT.Blocks) * 512
+		} else {
+			// Fallback in case syscall.Stat_t is not available
+			physicalSize = fi.Size()
 		}
-		records[name] = slice
+	} else {
+		// For a directory: traverse all files recursively
+		err = filepath.Walk(path, func(item string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				// Accumulate logical size
+				logicalSize += info.Size()
+				// Accumulate physical size using block count if available
+				if statT, ok := info.Sys().(*syscall.Stat_t); ok {
+					physicalSize += int64(statT.Blocks) * 512
+				} else {
+					physicalSize += info.Size()
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			log.Printf("Error walking through directory '%s': %v", path, err)
+			return
+		}
 	}
-	return records
+
+	fmt.Printf("Path: %s\nLogical size: %.2f MB\nPhysical size on disk: %.2f MB\n",
+		path, float64(logicalSize)/(1024*1024), float64(physicalSize)/(1024*1024))
 }
 
 func main() {

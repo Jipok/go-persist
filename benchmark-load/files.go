@@ -71,25 +71,6 @@ func writeFilesCommon(numFiles int, writeFunc func(i int, payload []byte) error)
 	return nil
 }
 
-// printDBSize outputs the size of the database file or directory after creation.
-func printDBSize(path string) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		log.Printf("Error getting file info for %s: %v\n", path, err)
-		return
-	}
-	if fi.IsDir() {
-		size, err := dirSize(path)
-		if err != nil {
-			log.Printf("Error calculating directory size for %s: %v\n", path, err)
-			return
-		}
-		fmt.Printf("Database at %s size: %.2f MB\n", path, float64(size)/(1024*1024))
-	} else {
-		fmt.Printf("Database file %s size: %.2f MB\n", path, float64(fi.Size())/(1024*1024))
-	}
-}
-
 // runBoltFiles performs a benchmark for BoltDB by writing "files"
 // with variable sizes (in the range 2–5 MB) and then measuring the access time for one file.
 func runBoltFiles() {
@@ -124,7 +105,7 @@ func runBoltFiles() {
 		}
 		fmt.Printf("Bolt Files write time: %.2fs\n", time.Since(start).Seconds())
 		// Output the database file size.
-		printDBSize("bolt_files.db")
+		printSize("bolt_files.db")
 	}
 
 	// Read phase: measure the access time for one file.
@@ -179,7 +160,7 @@ func runPebbleFiles() {
 		}
 		fmt.Printf("Pebble Files write time: %.2fs\n", time.Since(start).Seconds())
 		// Output the database file size.
-		printDBSize("pebble_files.db")
+		printSize("pebble_files.db")
 	}
 
 	// Read phase: measure the access time for one file.
@@ -243,7 +224,7 @@ func runBadgerFiles() {
 		}
 		fmt.Printf("Badger Files write time: %.2fs\n", time.Since(start).Seconds())
 		// Output the database directory size.
-		printDBSize("badger_files")
+		printSize("badger_files")
 	}
 
 	// Read phase: measure the access time for one file.
@@ -312,7 +293,7 @@ func runVoidDBFiles() {
 			log.Fatal(err)
 		}
 		fmt.Printf("voidDB Files write time: %.2fs\n", time.Since(start).Seconds())
-		printDBSize(voidPath)
+		printSize(voidPath)
 	}
 
 	// Read phase: measure the access time for one file.

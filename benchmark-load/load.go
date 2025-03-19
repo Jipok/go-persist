@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"runtime"
@@ -17,10 +19,80 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// Number of entries per map
+const numEntries = 81920
+
+var mapNames = []string{"map1", "map2", "map3", "map4", "map5"}
+var records map[string][]ComplexRecord
+
+// Complex metadata for a record.
+type Meta struct {
+	CreatedAt int64    // record creation timestamp
+	UpdatedAt int64    // record last update timestamp
+	Tags      []string // list of tags
+}
+
+// ComplexRecord is a more complex structure with multiple fields.
+type ComplexRecord struct {
+	ID          string // record identifier
+	Name        string // record name
+	Description string // record description
+	Data        string // fixed-size data payload
+	Meta        Meta   // nested metadata
+}
+
+// Generates a reproducible seed based on mapName, index and field identifier.
+func seedForField(mapName string, i int, field string) int64 {
+	h := fnv.New64a() // using FNV-1a hash algorithm
+	h.Write([]byte(mapName))
+	h.Write([]byte(field))
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i))
+	h.Write(buf)
+	return int64(h.Sum64())
+}
+
+// Generates a new ComplexRecord for a given map name and index
+func createRecord(mapName string, i int) ComplexRecord {
+	now := time.Now().Unix()
+	// Compute reproducible seeds for description and data.
+	descriptionSeed := seedForField(mapName, i, "description")
+	dataSeed := seedForField(mapName, i, "data")
+	return ComplexRecord{
+		ID:          fmt.Sprintf("%s-%d", mapName, i),
+		Name:        fmt.Sprintf("Record %d", i),
+		Description: generateHighEntropyLoremIpsum(42, descriptionSeed),
+		Data:        generateHighEntropyLoremIpsum(1024, dataSeed),
+		Meta: Meta{
+			CreatedAt: now,
+			UpdatedAt: now,
+			Tags:      []string{"tag1", "tag2", "tag3"},
+		},
+	}
+}
+
+// preGenerateRecords pre-generates(once) ComplexRecord entries for each map.
+// Returns a map where the key is the map name and the value is a slice of pre-generated records.
+func preGeneratedRecords() map[string][]ComplexRecord {
+	if records != nil {
+		return records
+	}
+	records = make(map[string][]ComplexRecord)
+	for _, name := range mapNames {
+		slice := make([]ComplexRecord, numEntries)
+		// Pre-generate records for each map
+		for i := 0; i < numEntries; i++ {
+			slice[i] = createRecord(name, i)
+		}
+		records[name] = slice
+	}
+	return records
+}
+
 func runPersist() {
 	// --- PART 1: Generate data ---
 	if _, err := os.Stat("persist.db"); errors.Is(err, os.ErrNotExist) {
-		preGenerated := preGenerateRecords(mapNames)
+		preGenerated := preGeneratedRecords()
 		flushPageCache()
 		start := time.Now()
 
@@ -128,7 +200,7 @@ func runPersist() {
 
 func runBoltDB() {
 	if _, err := os.Stat("bolt.db"); errors.Is(err, os.ErrNotExist) {
-		preGenerated := preGenerateRecords(mapNames)
+		preGenerated := preGeneratedRecords()
 		flushPageCache()
 		start := time.Now()
 
@@ -252,7 +324,7 @@ func runBoltDB() {
 
 func runBuntDB() {
 	if _, err := os.Stat("bunt.db"); errors.Is(err, os.ErrNotExist) {
-		preGenerated := preGenerateRecords(mapNames)
+		preGenerated := preGeneratedRecords()
 		flushPageCache()
 		start := time.Now()
 
@@ -364,7 +436,7 @@ func runPebble() {
 
 	// If the Pebble database does not exist, generate the data.
 	if _, err := os.Stat("pebble.db"); errors.Is(err, os.ErrNotExist) {
-		preGenerated := preGenerateRecords(mapNames)
+		preGenerated := preGeneratedRecords()
 		flushPageCache()
 		start := time.Now()
 
@@ -402,11 +474,7 @@ func runPebble() {
 
 	// If the database exists, measure raw load time and read performance.
 	flushPageCache()
-	size, err := dirSize("pebble.db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	println("Pebble dir size: ", size/1024/1024, " MB")
+	printSize("pebble.db")
 
 	measure("Pebble one", func() {
 		db, err := pebble.Open("pebble.db", &pebble.Options{Logger: discardLogger{}})
@@ -476,7 +544,7 @@ func runPebble() {
 func runBadger() {
 	// Check if the "badger" directory exists.
 	if _, err := os.Stat("badger.db"); errors.Is(err, os.ErrNotExist) {
-		preGenerated := preGenerateRecords(mapNames)
+		preGenerated := preGeneratedRecords()
 		flushPageCache()
 		start := time.Now()
 
@@ -533,12 +601,7 @@ func runBadger() {
 	// --- PART 2: Measure DB loading time ---
 
 	flushPageCache()
-	// Calculate and print the total size of the "badger" directory.
-	dirSz, err := dirSize("badger.db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	println("Badger DB dir size: ", dirSz/1024/1024, " MB")
+	printSize("badger.db")
 
 	measure("Badger one", func() {
 		opts := badger.DefaultOptions("badger.db")
@@ -616,7 +679,7 @@ func runVoidDB() {
 
 	// Check if the voidDB directory exists; if not, populate with data
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		preGenerated := preGenerateRecords(mapNames)
+		preGenerated := preGeneratedRecords()
 		flushPageCache()
 		start := time.Now()
 
@@ -666,12 +729,7 @@ func runVoidDB() {
 	// --- PART 2: Measure DB loading and read performance ---
 
 	flushPageCache()
-	// Calculate and print the total size of the "void" directory
-	size, err := dirSize(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	println("VoidDB dir size: ", size/1024/1024, " MB")
+	printSize(path)
 
 	measure("VoidDB one", func() {
 		v, err := voidDB.OpenVoid(path, capacity)
