@@ -21,11 +21,11 @@ func sequentialOpenBolt() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		// Read one value from bucket "bolt_map3" with key "key-40000"
+		// Read one value from bucket "map3" with key "key-40000"
 		err = db.View(func(tx *bolt.Tx) error {
-			bucket := tx.Bucket([]byte("bolt_map3"))
+			bucket := tx.Bucket([]byte("map3"))
 			if bucket == nil {
-				return fmt.Errorf("bucket bolt_map3 not found")
+				return fmt.Errorf("bucket map3 not found")
 			}
 			value := bucket.Get([]byte("key-40000"))
 			if value == nil {
@@ -35,7 +35,7 @@ func sequentialOpenBolt() {
 			if err := json.Unmarshal(value, &record); err != nil {
 				return err
 			}
-			if record.ID != "bolt_map3-40000" {
+			if record.ID != "map3-40000" {
 				return fmt.Errorf("Wrong value in BoltDB: %s", record.ID)
 			}
 			return nil
@@ -67,9 +67,9 @@ func sequentialOpenPebble() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		// Read one value with key "pebble_map3:key-40000"
+		// Read one value with key "map3:key-40000"
 		err = func() error {
-			key := "pebble_map3:key-40000"
+			key := "map3:key-40000"
 			value, closer, err := db.Get([]byte(key))
 			if err != nil {
 				return err
@@ -81,7 +81,7 @@ func sequentialOpenPebble() {
 			if err := json.Unmarshal(value, &record); err != nil {
 				return err
 			}
-			if record.ID != "pebble_map3-40000" {
+			if record.ID != "map3-40000" {
 				return fmt.Errorf("Wrong value in Pebble: %s", record.ID)
 			}
 			return nil
@@ -102,7 +102,7 @@ func sequentialOpenPebble() {
 func sequentialOpenBadger() {
 	flushPageCache()
 	start := time.Now()
-	opts := badger.DefaultOptions("badger")
+	opts := badger.DefaultOptions("badger.db")
 	opts.SyncWrites = false
 	opts.Logger = nil
 	for i := 0; i < 1000; i++ {
@@ -110,9 +110,9 @@ func sequentialOpenBadger() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		// Read one value with key "badger_map3:key-40000"
+		// Read one value with key "map3:key-40000"
 		err = db.View(func(txn *badger.Txn) error {
-			item, err := txn.Get([]byte("badger_map3:key-40000"))
+			item, err := txn.Get([]byte("map3:key-40000"))
 			if err != nil {
 				return err
 			}
@@ -122,7 +122,7 @@ func sequentialOpenBadger() {
 			}); err != nil {
 				return err
 			}
-			if record.ID != "badger_map3-40000" {
+			if record.ID != "map3-40000" {
 				return fmt.Errorf("Wrong value in BadgerDB: %s", record.ID)
 			}
 			return nil
@@ -141,17 +141,17 @@ func sequentialOpenBadger() {
 
 func sequentialOpenVoid() {
 	const capacity = 1024 * 1024 * 1024 * 20 // 20GB
-	const path = "void"
+	const path = "void.db"
 	start := time.Now()
 	for i := 0; i < 1000; i++ {
 		v, err := voidDB.OpenVoid(path, capacity)
 		if err != nil {
 			log.Fatal(err)
 		}
-		// Read one value from keyspace "void_map3" with key "key-40000"
+		// Read one value from keyspace "map3" with key "key-40000"
 		err = v.View(func(txn *voidDB.Txn) error {
-			// Open a cursor for the "void_map3" keyspace
-			cur, err := txn.OpenCursor([]byte("void_map3"))
+			// Open a cursor for the "map3" keyspace
+			cur, err := txn.OpenCursor([]byte("map3"))
 			if err != nil {
 				return err
 			}
@@ -163,7 +163,7 @@ func sequentialOpenVoid() {
 			if err := json.Unmarshal(val, &record); err != nil {
 				return err
 			}
-			if record.ID != "void_map3-40000" {
+			if record.ID != "map3-40000" {
 				return fmt.Errorf("Wrong value in VoidDB: %s", record.ID)
 			}
 			return nil

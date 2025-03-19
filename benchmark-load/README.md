@@ -106,26 +106,26 @@ With random access patterns, memory usage increases significantly for most solut
 
 | Solution | Small | Medium | Large |
 |----------|-------|--------|-------|
-| **BoltDB**   | **0.05ms** | **0.05ms** | **0.06ms** |
-| **VoidDB**  | 0.09ms | 0.08ms | 0.11ms |
-| Pebble   | 15.28ms | 15.26ms | 17.06ms |
-| BadgerDB  | 19.34ms | 19.47ms | 23.66ms |
+| **BoltDB**   | **0.05s** | **0.05s** | **0.06s** |
+| **VoidDB**  | 0.09s | 0.09s | 0.11s |
+| Pebble   | 15.28s | 15.26s | 17.06s |
+| BadgerDB  | 19.35s | 19.47s | 23.66s |
 
 This benchmark evaluates how quickly each solution can be opened, perform a single read operation, and then closed. This pattern is particularly important for short-lived processes, serverless functions, or applications that need to access data sporadically rather than maintain long-running connections.
 
-BoltDB demonstrates exceptional performance in this pattern, requiring only 0.05ms on average to complete the entire open-read-close cycle. VoidDB also performs admirably in this scenario. Pebble and BadgerDB, despite their other advantages, have significantly higher overhead when frequently opened and closed.
+BoltDB and VoidDB demonstrates exceptional performance in this scenario. Pebble and BadgerDB, despite their other advantages, have significantly higher overhead when frequently opened and closed.
 
 ## 📂 File Storage Performance (Binary Blobs 2-5MB each)
 
 This benchmark tests how each solution handles storing and retrieving large binary files (2-5MB each), mimicking use cases like document or image storage.
 
-| Solution | Write (100 files) | Write (1000 files) | Read (single file) | Memory (single read) | Storage Efficiency (1000 files) |
+| Solution | Write (100 files) | Write (1000 files) | Read (one) | Memory (read one) | Storage Efficiency (1000 files) |
 |----------|-------------------|-------------------|-------------------|---------------------|-------------------|
 | **VoidDB**   | **0.88s** | **8.38s** | **0.01s** | 6.7 KB | 3446.8 MB (5255.6 MB logical) |
 | **Badger**   | 1.10s | 12.27s | 0.04s | 88.2 MB | **3443.6 MB** |
 | BoltDB   | 1.60s | 23.65s | 0.08s | **3.2 KB** | 3444.6 MB |
 | Pebble   | 3.05s | 52.17s | 0.11s | 12.1 MB | 3463.9 MB |
-| Native FS | 0.90s | 8.35s | 0.01s | 2.5 MB | 3445.2 MB |
+| EXT4 | 0.90s | 8.35s | 0.01s | 2.5 MB | 3445.2 MB |
 
 VoidDB delivers the fastest write speeds, comparable to native filesystem operations. Badger balances good performance with optimal storage efficiency. The difference between VoidDB's logical and physical sizes indicates its use of sparse files. For single file reading, VoidDB and native filesystem operations provide the best performance.
 
