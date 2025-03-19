@@ -205,8 +205,8 @@ func printSize(path string) {
 		}
 	}
 
-	fmt.Printf("Path: %s\nLogical size: %.2f MB\nPhysical size on disk: %.2f MB\n",
-		path, float64(logicalSize)/(1024*1024), float64(physicalSize)/(1024*1024))
+	fmt.Printf("Physical size on disk: %.1f MB  (Logical %.1f MB)\n",
+		float64(physicalSize)/(1024*1024), float64(logicalSize)/(1024*1024))
 }
 
 func main() {
@@ -226,7 +226,7 @@ func main() {
 			runVoidDB()
 		//
 		case "seq":
-			fmt.Println("\nSequential open-read test (1000 iterations) without flushing disk cache:")
+			fmt.Println("Sequential open-read test (1000 iterations) without flushing disk cache:")
 			sequentialOpenBolt()
 			sequentialOpenPebble()
 			sequentialOpenBadger()
@@ -235,26 +235,20 @@ func main() {
 			precomputePayloads(numFiles)
 			println("File store test:", numFiles, "files\n")
 			runBoltFiles()
-			println()
 			runPebbleFiles()
-			println()
 			runBadgerFiles()
-			println()
 			runVoidDBFiles()
+			runExt4Files()
 		default:
-			log.Fatal("Unknown db")
+			log.Fatal("Unknown db/test")
 		}
 	} else {
+		println("Load test, entries per map: ", numEntries, "\n")
 		runPersist()
-		println()
 		runBoltDB()
-		println()
 		runBuntDB()
-		println()
 		runPebble()
-		println()
 		runBadger()
-		println()
 		runVoidDB()
 	}
 }

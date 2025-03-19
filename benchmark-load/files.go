@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -17,9 +18,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const numFiles = 1000
-const fileToCheck = 500
-const fileKey = "file-500"
+const numFiles = 100
+const fileToCheck = 50
+const fileKey = "file-50"
 
 var files_payloads [][]byte
 
@@ -134,6 +135,7 @@ func runBoltFiles() {
 			log.Fatal(err)
 		}
 	})
+	println()
 }
 
 // runPebbleFiles performs a benchmark for Pebble by writing "files"
@@ -189,16 +191,17 @@ func runPebbleFiles() {
 			log.Fatalf("Pebble Files: file has incorrect size: got %d, expected %d", len(value), expectedSize)
 		}
 	})
+	println()
 }
 
 // runBadgerFiles performs a benchmark for BadgerDB by writing "files"
 // with variable sizes (in the range 2–5 MB) and then measuring the access time for one file.
 func runBadgerFiles() {
-	if _, err := os.Stat("badger_files"); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat("badger_files.db"); errors.Is(err, os.ErrNotExist) {
 		flushPageCache()
 		start := time.Now()
 
-		opts := badger.DefaultOptions("badger_files")
+		opts := badger.DefaultOptions("badger_files.db")
 		opts.SyncWrites = false
 		opts.Logger = nil
 		db, err := badger.Open(opts)
@@ -224,13 +227,13 @@ func runBadgerFiles() {
 		}
 		fmt.Printf("Badger Files write time: %.2fs\n", time.Since(start).Seconds())
 		// Output the database directory size.
-		printSize("badger_files")
+		printSize("badger_files.db")
 	}
 
 	// Read phase: measure the access time for one file.
 	flushPageCache()
 	measure("Badger Files one", func() {
-		opts := badger.DefaultOptions("badger_files")
+		opts := badger.DefaultOptions("badger_files.db")
 		opts.SyncWrites = false
 		opts.Logger = nil
 		db, err := badger.Open(opts)
@@ -263,6 +266,7 @@ func runBadgerFiles() {
 			log.Fatal(err)
 		}
 	})
+	println()
 }
 
 func runVoidDBFiles() {
@@ -321,4 +325,53 @@ func runVoidDBFiles() {
 			log.Fatal(err)
 		}
 	})
+	println()
+}
+
+// runExt4Files performs a benchmark for ext4 filesystem by writing files
+// to a directory and then measuring the access time for one file.
+func runExt4Files() {
+	const dirName = "ext4_files.db"
+
+	// Check if the directory exists; if not, run write phase
+	if _, err := os.Stat(dirName); errors.Is(err, os.ErrNotExist) {
+		flushPageCache()
+		start := time.Now()
+
+		// Create the directory
+		if err := os.MkdirAll(dirName, 0755); err != nil {
+			log.Fatalf("Error creating directory: %v", err)
+		}
+
+		// Write phase: write files to the ext4 filesystem
+		if err := writeFilesCommon(numFiles, func(i int, payload []byte) error {
+			filePath := fmt.Sprintf("%s/file-%d", dirName, i)
+			return os.WriteFile(filePath, payload, 0644)
+		}); err != nil {
+			log.Fatal(err)
+		}
+
+		// FSync
+		if err := exec.Command("sync").Run(); err != nil {
+			log.Fatal("flushPageCache: sync: ", err)
+		}
+
+		fmt.Printf("EXT4 Files write time: %.2fs\n", time.Since(start).Seconds())
+		printSize(dirName)
+	}
+
+	// Read phase: measure the access time for one file.
+	flushPageCache()
+	measure("EXT4 Files one", func() {
+		filePath := fmt.Sprintf("%s/%s", dirName, fileKey)
+		size, err := readFileToMemory(filePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		expectedSize := getFileSize(fileToCheck)
+		if size != expectedSize {
+			log.Fatalf("EXT4 Files: file has incorrect size: got %d, expected %d", size, expectedSize)
+		}
+	})
+	println()
 }
